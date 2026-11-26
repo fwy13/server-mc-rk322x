@@ -475,42 +475,53 @@ impl Arena {
             p.poll();
 
             // Cập nhật hoạt ảnh quay rương Gacha
-            if let Some(spin) = &mut p.gacha {
-                if spin.advance(now) {
-                    p.push(spin.frame());
-                    if spin.is_done() && !spin.rewarded {
-                        spin.rewarded = true;
-                        let prize = &PRIZES[spin.prize_idx];
-                        p.coins += prize.coins;
-                        if !prize.badge.is_empty() {
-                            p.badge = prize.badge;
+                        let mut gacha_frame = None;
+                        let mut gacha_prize = None;
+                        let mut gacha_close = false;
+                        if let Some(spin) = &mut p.gacha {
+                            if spin.advance(now) {
+                                gacha_frame = Some(spin.frame());
+                                if spin.is_done() && !spin.rewarded {
+                                    spin.rewarded = true;
+                                    gacha_prize = Some(spin.prize_idx);
+                                }
+                            }
+                            gacha_close = spin.close_at.is_some_and(|t| now >= t);
                         }
-                        p.push(title("TRÚNG THƯỞNG!", prize.name, prize.color));
-                        p.push(action_bar(
-                            &format!("✦ Gacha: {} · Tổng: {} Xu ✦", prize.name, p.coins),
-                            prize.color,
-                        ));
-                        p.push(chat(&format!(
-                            "✦ Rương Gacha: Bạn nhận được {}!",
-                            prize.name
-                        )));
-                        if prize.legendary {
-                            broadcasts.push(format!(
-                                "★ {} vừa nổ hũ {} từ Rương Gacha! ★",
-                                p.display_name(),
-                                prize.name
+                        if let Some(frame) = gacha_frame {
+                            p.push(frame);
+                        }
+                        if let Some(idx) = gacha_prize {
+                            let prize = &PRIZES[idx];
+                            p.coins += prize.coins;
+                            if !prize.badge.is_empty() {
+                                p.badge = prize.badge;
+                            }
+                            p.push(title("TRÚNG THƯỞNG!", prize.name, prize.color));
+                            p.push(action_bar(
+                                &format!("✦ Gacha: {} · Tổng: {} Xu ✦", prize.name, p.coins),
+                                prize.color,
                             ));
+                            p.push(chat(&format!(
+                                "✦ Rương Gacha: Bạn nhận được {}!",
+                                prize.name
+                            )));
+                            if prize.legendary {
+                                broadcasts.push(format!(
+                                    "★ {} vừa nổ hũ {} từ Rương Gacha! ★",
+                                    p.display_name(),
+                                    prize.name
+                                ));
+                            }
                         }
-                    }
-                }
-                if spin.close_at.is_some_and(|t| now >= t) {
-                    p.gacha = None;
-                    if p.menu == Some(MenuKind::Gacha) {
-                        p.menu = None;
-                        p.push(close_packet());
-                    }
-                    p.sync_bossbar();
-                }
+                        if gacha_close {
+                            p.gacha = None;
+                            if p.menu == Some(MenuKind::Gacha) {
+                                p.menu = None;
+                                p.push(close_packet());
+                            }
+                            p.sync_bossbar();
+                        }
             }
 
             let active = self

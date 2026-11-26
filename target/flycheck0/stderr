@@ -1,2 +1,4 @@
-    Checking rk-festival v1.0.0 (/home/fwy13/Pictures/rk-festival)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+   Compiling rk-festival v1.0.0 (/home/fwy13/Pictures/rk-festival)
+error: could not compile `rk-festival` (bin "rk-festival" test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `rk-festival` (bin "rk-festival") due to 1 previous error
