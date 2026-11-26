@@ -607,8 +607,8 @@ impl Arena {
                                     ));
                                 }
                                 p.sync_bossbar();
-                            }
-                        }
+
+
                     }
                 } else if p.pos.y < 77.
                     || p.pos.y > 85.
