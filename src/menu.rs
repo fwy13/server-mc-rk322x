@@ -6,9 +6,9 @@ use crate::{
 use std::sync::OnceLock;
 
 // Lưu ý: Đối chiếu các Packet ID này với vanilla 26.3 (protocol 777) data reports.
-pub const CB_CLOSE_CONTAINER: i32 = 0x12;
-pub const CB_SET_CONTAINER_CONTENT: i32 = 0x13;
-pub const CB_OPEN_SCREEN: i32 = 0x34;
+pub const CB_CLOSE_CONTAINER: i32 = 0x11;
+pub const CB_SET_CONTAINER_CONTENT: i32 = 0x12;
+pub const CB_OPEN_SCREEN: i32 = 0x3c;
 pub const WINDOW_ID: u8 = 1;
 const GENERIC_9X3: i32 = 2; // MenuType: generic_9x3
 
