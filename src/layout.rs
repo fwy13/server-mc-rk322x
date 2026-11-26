@@ -282,8 +282,8 @@ pub fn parkour_world() -> Blocks {
     }
 
     // 2. Đảo Trung Tâm Khám Phá (x=35..52, z=-9..9, y=77)
-    for x in 35..=52 {
-        for z in -9..=9 {
+    for x in 35i32..=52 {
+        for z in -9i32..=9 {
             let edge = x == 35 || x == 52 || z.abs() == 9;
             let mat = if edge {
                 STONE
@@ -303,8 +303,8 @@ pub fn parkour_world() -> Blocks {
     }
 
     // 3. Đền Gacha tại (43, 78, 0)
-    for dx in -2..=2 {
-        for dz in -2..=2 {
+    for dx in -2i32..=2 {
+        for dz in -2i32..=2 {
             b.insert((43 + dx, 77, dz), GOLD);
             if dx.abs() == 2 && dz.abs() == 2 {
                 for y in 78..=82 {
