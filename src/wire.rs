@@ -194,3 +194,31 @@ pub fn movement(id: i32, p: Pos) -> Buf {
     b.push(1);
     packet(0x23, &b)
 }
+
+pub fn action_bar(s: &str, color: &str) -> Buf {
+    packet(0x59, &component(s, color))
+}
+pub fn boss_bar_add(uuid: &[u8; 16], s: &str, color: &str, health: f32, bar_color: i32) -> Buf {
+    let mut b = uuid.to_vec();
+    b.extend(vi(0));
+    b.extend(component(s, color));
+    b.extend(health.clamp(0.0, 1.0).to_be_bytes());
+    b.extend(vi(bar_color));
+    b.extend(vi(0));
+    b.push(0);
+    packet(0x09, &b)
+}
+pub fn boss_bar_update(uuid: &[u8; 16], s: &str, color: &str, health: f32) -> Buf {
+    let mut h = uuid.to_vec();
+    h.extend(vi(2));
+    h.extend(health.clamp(0.0, 1.0).to_be_bytes());
+    let mut t = uuid.to_vec();
+    t.extend(vi(3));
+    t.extend(component(s, color));
+    [packet(0x09, &h), packet(0x09, &t)].concat()
+}
+pub fn boss_bar_remove(uuid: &[u8; 16]) -> Buf {
+    let mut b = uuid.to_vec();
+    b.extend(vi(1));
+    packet(0x09, &b)
+}

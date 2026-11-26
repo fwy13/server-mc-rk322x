@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::colors::{BLUE, GOLD, LIME, RED, WHITE};
 use crate::course::{GATES, START};
 use std::collections::BTreeMap;
@@ -144,5 +145,262 @@ pub fn landscape() -> Blocks {
             b.insert((x, 98, z), PLANK);
         }
     }
+    b
+}
+
+pub const GACHA_SHRINE: (i32, i32, i32) = (43, 78, 0);
+pub const PARKOUR_START: (i32, i32, i32) = (40, 78, 0);
+pub const PARKOUR_CHECKPOINTS: [(i32, i32, i32, &str); 8] = [
+    (56, 79, 0, "Cổng Rừng Thông"),
+    (66, 86, 26, "Đảo Rừng Nổi"),
+    (40, 94, 58, "Cầu Băng Tuyết"),
+    (-2, 102, 60, "Pháo Đài Gạch"),
+    (-52, 110, 26, "Đảo Sắc Màu"),
+    (-54, 126, -18, "Tháp Xoắn Ốc"),
+    (-6, 129, -56, "Cầu Trời Mây"),
+    (50, 136, -38, "Đỉnh Khải Hoàn"),
+];
+
+fn glyph_3x5(c: char) -> [u8; 5] {
+    match c {
+        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
+        'C' => [0b011, 0b100, 0b100, 0b100, 0b011],
+        'G' => [0b011, 0b100, 0b101, 0b101, 0b011],
+        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
+        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
+        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+        'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
+        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+        '2' => [0b110, 0b001, 0b010, 0b100, 0b111],
+        '3' => [0b110, 0b001, 0b010, 0b001, 0b110],
+        '6' => [0b011, 0b100, 0b111, 0b101, 0b111],
+        '.' => [0b000, 0b000, 0b000, 0b000, 0b010],
+        _ => [0; 5],
+    }
+}
+
+/// Vẽ chữ nổi 3D phát sáng trên bầu trời (font 3x5 có lớp nền màu).
+fn draw_text_3d(
+    b: &mut Blocks,
+    text: &str,
+    origin: (i32, i32, i32),
+    dx: i32,
+    dz: i32,
+    front: i32,
+    back: i32,
+) {
+    let mut cursor = 0i32;
+    for ch in text.chars() {
+        let rows = glyph_3x5(ch);
+        for (ry, &mask) in rows.iter().enumerate() {
+            let y = origin.1 + (4 - ry as i32);
+            for rx in 0..3 {
+                if (mask >> (2 - rx)) & 1 != 0 {
+                    let step = cursor + rx;
+                    let x = origin.0 + step * dx;
+                    let z = origin.2 + step * dz;
+                    b.insert((x, y, z), front);
+                    b.insert((x - dz, y, z + dx), back);
+                }
+            }
+        }
+        cursor += if ch == ' ' { 2 } else { 4 };
+    }
+}
+
+fn pad(b: &mut Blocks, cx: i32, y: i32, cz: i32, r: i32, top: i32, under: i32) {
+    for dx in -r..=r {
+        for dz in -r..=r {
+            b.insert((cx + dx, y, cz + dz), top);
+            if under != 0 && dx.abs() + dz.abs() <= r {
+                b.insert((cx + dx, y - 1, cz + dz), under);
+            }
+        }
+    }
+}
+
+/// Tạo chuỗi bậc nhảy parkour nối hai điểm, đảm bảo khoảng cách nhảy ngang <= 3 và độ cao <= 1.
+fn parkour_chain(
+    b: &mut Blocks,
+    from: (i32, i32, i32),
+    to: (i32, i32, i32),
+    mat_a: i32,
+    mat_b: i32,
+    under: i32,
+) {
+    let dx = (to.0 - from.0) as f64;
+    let dy = (to.1 - from.1) as f64;
+    let dz = (to.2 - from.2) as f64;
+    let horiz = dx.hypot(dz);
+    let steps = (horiz / 3.4).ceil().max(dy.abs()).max(1.0) as i32;
+    for i in 1..steps {
+        let t = i as f64 / steps as f64;
+        let x = from.0 + (dx * t).round() as i32;
+        let y = from.1 + (dy * t).round() as i32;
+        let z = from.2 + (dz * t).round() as i32;
+        let m = if i % 2 == 0 { mat_a } else { mat_b };
+        pad(b, x, y, z, 1, m, under);
+    }
+}
+
+fn pine_tree(b: &mut Blocks, x: i32, base_y: i32, z: i32, h: i32) {
+    for y in base_y..base_y + h {
+        b.insert((x, y, z), LOG);
+    }
+    for (dy, r) in [(2, 2i32), (3, 2), (4, 1), (5, 1), (6, 0)] {
+        for dx in -r..=r {
+            for dz in -r..=r {
+                if dx.abs() + dz.abs() <= r + 1 {
+                    b.insert((x + dx, base_y + dy + (h - 6).max(0), z + dz), LEAVES);
+                }
+            }
+        }
+    }
+}
+
+/// Bản đồ khám phá mở rộng (121 chunks) + Parkour 8 chặng trên không + Đền Gacha + Chữ nổi 3D.
+#[allow(dead_code)]
+pub fn parkour_world() -> Blocks {
+    let mut b = Blocks::new();
+
+    // 1. Cầu gỗ nối từ khán đài Lobby (x=25) sang Đảo Khám Phá (x=35)
+    for x in 25..=34 {
+        for z in -2..=2 {
+            b.insert((x, 77, z), if z == 0 && x % 2 == 0 { GOLD } else { PLANK });
+        }
+        if x % 3 == 0 {
+            for z in [-2, 2] {
+                b.insert((x, 78, z), LOG);
+                b.insert((x, 79, z), LIGHT);
+            }
+        }
+    }
+
+    // 2. Đảo Trung Tâm Khám Phá (x=35..52, z=-9..9, y=77)
+    for x in 35..=52 {
+        for z in -9..=9 {
+            let edge = x == 35 || x == 52 || z.abs() == 9;
+            let mat = if edge {
+                STONE
+            } else if z.abs() <= 1 || (x - 43).abs() <= 1 {
+                PATH
+            } else {
+                GRASS
+            };
+            b.insert((x, 77, z), mat);
+            if (x - 43).abs() + z.abs() <= 12 {
+                b.insert((x, 76, z), STONE);
+            }
+        }
+    }
+    for (tx, tz, h) in [(37, -7, 6), (37, 7, 7), (50, -7, 6), (50, 7, 7)] {
+        pine_tree(&mut b, tx, 78, tz, h);
+    }
+
+    // 3. Đền Gacha tại (43, 78, 0)
+    for dx in -2..=2 {
+        for dz in -2..=2 {
+            b.insert((43 + dx, 77, dz), GOLD);
+            if dx.abs() == 2 && dz.abs() == 2 {
+                for y in 78..=82 {
+                    b.insert((43 + dx, y, dz), BRICKS);
+                }
+                b.insert((43 + dx, 83, dz), LIGHT);
+            }
+        }
+    }
+    b.insert((43, 78, 0), GOLD);
+    b.insert((43, 79, 0), LIGHT);
+
+    // 4. Chữ nổi 3D phát sáng trên bầu trời
+    draw_text_3d(&mut b, "GACHA", (43, 86, -9), 0, 1, LIGHT, GOLD);
+    draw_text_3d(&mut b, "RK 26.3", (36, 102, -13), 0, 1, LIGHT, RED);
+    draw_text_3d(&mut b, "PARKOUR", (56, 87, -13), 0, 1, LIGHT, LIME);
+
+    // 5. Đường chạy Parkour 8 chặng quanh quần đảo trên không
+    let cps = PARKOUR_CHECKPOINTS;
+
+    // Nối Đảo Trung Tâm -> Chặng 1 (Cổng Rừng Thông)
+    parkour_chain(&mut b, (52, 77, 0), (cps[0].0, cps[0].1 - 1, cps[0].2), PLANK, GOLD, LOG);
+
+    // Chặng 1 -> Chặng 2: Rừng Thông Nổi
+    parkour_chain(&mut b, (cps[0].0, cps[0].1 - 1, cps[0].2), (cps[1].0, cps[1].1 - 1, cps[1].2), GRASS, LOG, STONE);
+    // Đảo cảnh quan Rừng Thông
+    pad(&mut b, cps[1].0, cps[1].1 - 1, cps[1].2, 4, GRASS, STONE);
+    pine_tree(&mut b, cps[1].0 + 3, cps[1].1, cps[1].2 - 3, 7);
+    pine_tree(&mut b, cps[1].0 - 3, cps[1].1, cps[1].2 + 3, 6);
+
+    // Chặng 2 -> Chặng 3: Cầu Băng Tuyết
+    parkour_chain(&mut b, (cps[1].0, cps[1].1 - 1, cps[1].2), (cps[2].0, cps[2].1 - 1, cps[2].2), ICE, SNOW, STONE);
+    pad(&mut b, cps[2].0, cps[2].1 - 1, cps[2].2, 4, SNOW, ICE);
+    for dy in 0..7 {
+        b.insert((cps[2].0 + 3, cps[2].1 + dy, cps[2].2 + 3), if dy == 6 { LIGHT } else { ICE });
+        b.insert((cps[2].0 - 3, cps[2].1 + dy, cps[2].2 + 3), if dy == 6 { LIGHT } else { ICE });
+    }
+
+    // Chặng 3 -> Chặng 4: Pháo Đài Gạch
+    parkour_chain(&mut b, (cps[2].0, cps[2].1 - 1, cps[2].2), (cps[3].0, cps[3].1 - 1, cps[3].2), BRICKS, STONE, STONE);
+    pad(&mut b, cps[3].0, cps[3].1 - 1, cps[3].2, 4, BRICKS, STONE);
+    for (ox, oz) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
+        for y in 0..5 {
+            b.insert((cps[3].0 + ox, cps[3].1 + y, cps[3].2 + oz), BRICKS);
+        }
+        b.insert((cps[3].0 + ox, cps[3].1 + 5, cps[3].2 + oz), LIGHT);
+    }
+
+    // Chặng 4 -> Chặng 5: Đảo Sắc Màu
+    parkour_chain(&mut b, (cps[3].0, cps[3].1 - 1, cps[3].2), (cps[4].0, cps[4].1 - 1, cps[4].2), RED, LIME, BLUE);
+    pad(&mut b, cps[4].0, cps[4].1 - 1, cps[4].2, 4, BLUE, WHITE);
+
+    // Chặng 5 -> Chặng 6: Tháp Xoắn Ốc (xoay vòng leo cao 16 block quanh lõi sáng)
+    parkour_chain(&mut b, (cps[4].0, cps[4].1 - 1, cps[4].2), (-54, 110, -10), GOLD, WHITE, STONE);
+    let (tcx, tcz) = (-54i32, -18i32);
+    for y in 108..=127 {
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                let m = if dx == 0 && dz == 0 { LIGHT } else { BRICKS };
+                b.insert((tcx + dx, y, tcz + dz), m);
+            }
+        }
+    }
+    for step in 0..16 {
+        let ang = (step as f64) * 0.55;
+        let rx = tcx + (ang.cos() * 5.2).round() as i32;
+        let rz = tcz + (ang.sin() * 5.2).round() as i32;
+        let ry = 110 + step;
+        pad(&mut b, rx, ry, rz, 1, if step % 2 == 0 { GOLD } else { PLANK }, STONE);
+    }
+    pad(&mut b, cps[5].0, cps[5].1 - 1, cps[5].2, 4, GOLD, BRICKS);
+
+    // Chặng 6 -> Chặng 7: Cầu Trời Mây
+    parkour_chain(&mut b, (cps[5].0, cps[5].1 - 1, cps[5].2), (cps[6].0, cps[6].1 - 1, cps[6].2), WHITE, PLANK, WHITE);
+    pad(&mut b, cps[6].0, cps[6].1 - 1, cps[6].2, 4, WHITE, SNOW);
+
+    // Chặng 7 -> Chặng 8: Đèo Tuyết Cổ -> Đỉnh Khải Hoàn
+    parkour_chain(&mut b, (cps[6].0, cps[6].1 - 1, cps[6].2), (cps[7].0, cps[7].1 - 1, cps[7].2), SNOW, GOLD, ICE);
+
+    // 6. Đền Đỉnh Khải Hoàn (13x13) tại Chặng 8 + Chữ nổi "SUMMIT"
+    let (sx, sy, sz) = (cps[7].0, cps[7].1 - 1, cps[7].2);
+    pad(&mut b, sx, sy, sz, 6, GOLD, BRICKS);
+    pad(&mut b, sx, sy, sz, 3, WHITE, GOLD);
+    b.insert((sx, sy, sz), LIGHT);
+    for (ox, oz) in [(-5, -5), (5, -5), (-5, 5), (5, 5)] {
+        for y in 1..=7 {
+            b.insert((sx + ox, sy + y, sz + oz), if y == 7 { LIGHT } else { GOLD });
+        }
+    }
+    draw_text_3d(&mut b, "SUMMIT", (sx - 11, sy + 9, sz - 6), 1, 0, LIGHT, GOLD);
+
+    // 7. Đánh dấu từng Checkpoint bằng bệ sáng LIME + cột đèn
+    for &(cx, cy, cz, _) in &cps {
+        pad(&mut b, cx, cy - 1, cz, 2, LIME, GOLD);
+        b.insert((cx, cy - 1, cz), LIGHT);
+    }
+
     b
 }

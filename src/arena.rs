@@ -1,9 +1,17 @@
 use crate::{
     games::*,
+    layout::{GACHA_SHRINE, PARKOUR_CHECKPOINTS, PARKOUR_START},
+    menu::{
+        close_packet, open_gacha_screen, open_packets, GachaSpin, MenuKind, GACHA_COST, PRIZES,
+        SLOT_GACHA, SLOT_LOBBY, SLOT_PARKOUR,
+    },
     net::{Event, Guest, Shared, LOBBY},
     wire::*,
 };
 use std::{collections::BTreeMap, net::Shutdown, sync::Arc};
+
+const BOSS_UUID: [u8; 16] = *b"RKFESTIVALPARK01";
+
 struct Player {
     id: i32,
     g: Guest,
@@ -13,8 +21,16 @@ struct Player {
     moved: bool,
     punch: bool,
     wins: i32,
+    coins: i32,
+    badge: &'static str,
+    exploring: bool,
+    cp: usize,
+    parkour_anchor: Pos,
+    boss_shown: bool,
+    gacha: Option<GachaSpin>,
+    gacha_cd: u64,
     rows: [String; 5],
-    menu_open: bool,
+    menu: Option<MenuKind>,
 }
 impl Player {
     fn send(&self, data: Shared) {
@@ -45,6 +61,32 @@ impl Player {
             s.dirty = false
         }
     }
+    fn display_name(&self) -> String {
+        if self.badge.is_empty() {
+            self.g.name.clone()
+        } else {
+            format!("{} {}", self.badge, self.g.name)
+        }
+    }
+    fn sync_bossbar(&mut self) {
+        if self.exploring {
+            let total = PARKOUR_CHECKPOINTS.len();
+            let pct = self.cp as f32 / total as f32;
+            let label = format!(
+                "✦ PARKOUR · Chặng {}/{} · {} Xu ✦",
+                self.cp, total, self.coins
+            );
+            if !self.boss_shown {
+                self.boss_shown = true;
+                self.push(boss_bar_add(&BOSS_UUID, &label, "gold", pct, 4));
+            } else {
+                self.push(boss_bar_update(&BOSS_UUID, &label, "gold", pct));
+            }
+        } else if self.boss_shown {
+            self.boss_shown = false;
+            self.push(boss_bar_remove(&BOSS_UUID));
+        }
+    }
 }
 pub struct Arena {
     players: BTreeMap<i32, Player>,
@@ -53,6 +95,7 @@ pub struct Arena {
     index: usize,
     round: Option<Round>,
     seed: u64,
+    now: u64,
     floor: [i32; N],
     lower: [i32; N],
     props: [[i32; N]; 2],
@@ -72,6 +115,7 @@ impl Arena {
             index: 0,
             round: None,
             seed,
+            now: 0,
             floor: [WHITE; N],
             lower: [0; N],
             props: [[0; N]; 2],
@@ -98,40 +142,162 @@ impl Arena {
         self.cast([title(main, sub, color), chat(&format!("{main} · {sub}"))].concat());
         println!("{main} · {sub}")
     }
+    fn next_seed(&mut self) -> u64 {
+        self.seed = self
+            .seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.seed
+    }
+    fn open_gacha(&mut self, id: i32) {
+        let now = self.now;
+        let seed = self.next_seed() ^ (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
+        let Some(p) = self.players.get_mut(&id) else {
+            return;
+        };
+        if p.gacha.is_some() {
+            return;
+        }
+        if p.coins < GACHA_COST {
+            p.push(action_bar(
+                &format!(
+                    "Cần {} Xu để quay Gacha (hiện có {} Xu)!",
+                    GACHA_COST, p.coins
+                ),
+                "red",
+            ));
+            return;
+        }
+        p.coins -= GACHA_COST;
+        p.gacha_cd = now + 1500;
+        let spin = GachaSpin::new(seed, now);
+        p.push([open_gacha_screen(), spin.frame()].concat());
+        p.push(action_bar("✦ Đang quay rương Gacha... ✦", "gold"));
+        p.menu = Some(MenuKind::Gacha);
+        p.gacha = Some(spin);
+        p.sync_bossbar();
+    }
+    fn enter_parkour(&mut self, id: i32) {
+        if let Some(p) = self.players.get_mut(&id) {
+            p.exploring = true;
+            let start = Pos::at(
+                PARKOUR_START.0 as f64 + 0.5,
+                PARKOUR_START.1 as f64,
+                PARKOUR_START.2 as f64 + 0.5,
+            );
+            if p.cp == 0 {
+                p.parkour_anchor = start;
+            }
+            p.warp(p.parkour_anchor);
+            p.sync_bossbar();
+            p.push(title(
+                "KHÁM PHÁ & PARKOUR",
+                "Chinh phục 8 chặng · Gõ !lobby để về đấu trường",
+                "green",
+            ));
+        }
+    }
+    fn leave_parkour(&mut self, id: i32) {
+        if let Some(p) = self.players.get_mut(&id) {
+            p.exploring = false;
+            p.sync_bossbar();
+            p.warp(LOBBY);
+            p.push(action_bar("Đã quay về sảnh đấu trường!", "aqua"));
+        }
+    }
     pub fn event(&mut self, event: Event) {
         match event {
             Event::Chat(id, msg) => {
-                if msg == "!menu" {
-                    if let Some(p) = self.players.get_mut(&id) {
-                        p.menu_open = true;
-                        p.send(crate::menu::open_packets());
+                match msg.as_str() {
+                    "!menu" => {
+                        if let Some(p) = self.players.get_mut(&id) {
+                            p.gacha = None;
+                            p.menu = Some(MenuKind::Games);
+                            p.send(open_packets());
+                        }
+                        return;
                     }
-                    return;
+                    "!gacha" => {
+                        self.open_gacha(id);
+                        return;
+                    }
+                    "!parkour" => {
+                        self.enter_parkour(id);
+                        return;
+                    }
+                    "!lobby" => {
+                        self.leave_parkour(id);
+                        return;
+                    }
+                    _ => {}
                 }
                 if let Some(p) = self.players.get(&id) {
-                    self.cast(chat(&format!("<{}> {}", p.g.name, msg)));
+                    self.cast(chat(&format!("<{}> {}", p.display_name(), msg)));
                 }
             }
             Event::MenuClose(id) => {
                 if let Some(p) = self.players.get_mut(&id) {
-                    p.menu_open = false;
+                    p.menu = None;
+                    if let Some(spin) = p.gacha.take() {
+                        if !spin.rewarded {
+                            let prize = &PRIZES[spin.prize_idx];
+                            p.coins += prize.coins;
+                            if !prize.badge.is_empty() {
+                                p.badge = prize.badge;
+                            }
+                            p.push(chat(&format!("✦ Gacha: Bạn nhận được {}!", prize.name)));
+                            p.sync_bossbar();
+                        }
+                    }
                 }
             }
             Event::MenuClick(id, slot) => {
-                let Some(p) = self.players.get_mut(&id) else {
-                    return;
+                let kind = match self.players.get(&id).and_then(|p| p.menu) {
+                    Some(k) => k,
+                    None => return,
                 };
-                if !p.menu_open {
-                    return;
-                }
-                p.menu_open = false;
-                p.push(crate::menu::close_packet());
-                if let Some(&game) = GAMES.get(slot as usize) {
-                    if let Some(pos) = self.list.iter().position(|&g| g == game) {
-                        self.index = pos;
-                        let name = game.meta().1;
-                        let who = p.g.name.clone();
-                        self.cast(chat(&format!("{who} đã chọn ván kế: {name}")));
+                match kind {
+                    MenuKind::Gacha => {
+                        if let Some(p) = self.players.get_mut(&id) {
+                            if let Some(spin) = &p.gacha {
+                                if !spin.is_done() {
+                                    // Chống desync item khi rương đang quay
+                                    p.push(spin.frame());
+                                    return;
+                                }
+                            }
+                            p.menu = None;
+                            p.gacha = None;
+                            p.push(close_packet());
+                        }
+                    }
+                    MenuKind::Games => {
+                        if let Some(p) = self.players.get_mut(&id) {
+                            p.menu = None;
+                            p.push(close_packet());
+                        }
+                        if slot == SLOT_PARKOUR {
+                            self.enter_parkour(id);
+                            return;
+                        }
+                        if slot == SLOT_GACHA {
+                            self.open_gacha(id);
+                            return;
+                        }
+                        if slot == SLOT_LOBBY {
+                            self.leave_parkour(id);
+                            return;
+                        }
+                        if let Some(&game) = GAMES.get(slot as usize) {
+                            if let Some(pos) = self.list.iter().position(|&g| g == game) {
+                                self.index = pos;
+                                let name = game.meta().1;
+                                if let Some(p) = self.players.get(&id) {
+                                    let who = p.display_name();
+                                    self.cast(chat(&format!("{who} đã chọn ván kế: {name}")));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -160,6 +326,11 @@ impl Arena {
                     )));
                     return;
                 }
+                let start_anchor = Pos::at(
+                    PARKOUR_START.0 as f64 + 0.5,
+                    PARKOUR_START.1 as f64,
+                    PARKOUR_START.2 as f64 + 0.5,
+                );
                 let mut p = Player {
                     id,
                     g,
@@ -169,8 +340,16 @@ impl Arena {
                     moved: false,
                     punch: false,
                     wins: 0,
+                    coins: 30,
+                    badge: "",
+                    exploring: false,
+                    cp: 0,
+                    parkour_anchor: start_anchor,
+                    boss_shown: false,
+                    gacha: None,
+                    gacha_cd: 0,
                     rows: Default::default(),
-                    menu_open: false,
+                    menu: None,
                 };
                 let mut join = include_bytes!("../assets/join.bin").to_vec();
                 join[..4].copy_from_slice(&id.to_be_bytes());
@@ -178,7 +357,7 @@ impl Arena {
                     [
                         packet(0x32, &join),
                         packet(0x27, &[13, 0, 0, 0, 0]),
-                        packet(0x61, &[6]),
+                        packet(0x61, &[8]),
                         packet(0x60, &[0, 0]),
                     ]
                     .concat(),
@@ -214,7 +393,9 @@ impl Arena {
                     "gold",
                 ));
                 p.push(all);
-                p.push(chat("Nhấn T để trò chuyện với mọi người."));
+                p.push(chat(
+                    "Lệnh: !menu (chọn trò) · !parkour (khám phá) · !gacha (quay rương 10 Xu) · !lobby",
+                ));
                 if self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
                     p.warp(crate::course::balcony());
                 } else {
@@ -257,17 +438,20 @@ impl Arena {
         self.results_until = now + 3000;
         let msg = match winners.as_slice() {
             [] => "Hết giờ · chưa có người thắng".to_owned(),
-            [id] => format!("{} chiến thắng!", self.players[id].g.name),
-            many => format!("{} người cùng thắng!", many.len()),
+            [id] => format!("{} chiến thắng! (+10 Xu)", self.players[id].display_name()),
+            many => format!("{} người cùng thắng! (+10 Xu)", many.len()),
         };
         for id in winners {
             if let Some(p) = self.players.get_mut(&id) {
-                p.wins += 1
+                p.wins += 1;
+                p.coins += 10;
             }
         }
         self.announce("KẾT THÚC", &msg, "gold");
         for p in self.players.values_mut() {
-            p.warp(LOBBY)
+            if !p.exploring {
+                p.warp(LOBBY)
+            }
         }
         if self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
             let clear = crate::world::frames(false);
@@ -282,13 +466,59 @@ impl Arena {
         self.terrain()
     }
     pub fn tick(&mut self, now: u64) {
+        self.now = now;
+        let is_rally = self.round.as_ref().is_some_and(|r| r.game == Game::Rally);
+        let mut gacha_triggers = vec![];
+        let mut broadcasts = vec![];
+
         for p in self.players.values_mut() {
             p.poll();
+
+            // Cập nhật hoạt ảnh quay rương Gacha
+            if let Some(spin) = &mut p.gacha {
+                if spin.advance(now) {
+                    p.push(spin.frame());
+                    if spin.is_done() && !spin.rewarded {
+                        spin.rewarded = true;
+                        let prize = &PRIZES[spin.prize_idx];
+                        p.coins += prize.coins;
+                        if !prize.badge.is_empty() {
+                            p.badge = prize.badge;
+                        }
+                        p.push(title("TRÚNG THƯỞNG!", prize.name, prize.color));
+                        p.push(action_bar(
+                            &format!("✦ Gacha: {} · Tổng: {} Xu ✦", prize.name, p.coins),
+                            prize.color,
+                        ));
+                        p.push(chat(&format!(
+                            "✦ Rương Gacha: Bạn nhận được {}!",
+                            prize.name
+                        )));
+                        if prize.legendary {
+                            broadcasts.push(format!(
+                                "★ {} vừa nổ hũ {} từ Rương Gacha! ★",
+                                p.display_name(),
+                                prize.name
+                            ));
+                        }
+                    }
+                }
+                if spin.close_at.is_some_and(|t| now >= t) {
+                    p.gacha = None;
+                    if p.menu == Some(MenuKind::Gacha) {
+                        p.menu = None;
+                        p.push(close_packet());
+                    }
+                    p.sync_bossbar();
+                }
+            }
+
             let active = self
                 .round
                 .as_ref()
                 .is_some_and(|r| r.runners.get(&p.id).is_some_and(|v| v.alive));
-            if !active && self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
+
+            if !active && is_rally {
                 if p.ready
                     && (!(16.0..24.0).contains(&p.pos.x)
                         || !(3.0..9.0).contains(&p.pos.z)
@@ -296,17 +526,96 @@ impl Arena {
                 {
                     p.warp(crate::course::balcony());
                 }
-            } else if !active
-                && p.ready
-                && (p.pos.y < 77.
+            } else if !active && p.ready {
+                // Tự động vào chế độ Khám phá / Parkour khi bước qua cầu gỗ (x > 25)
+                if !p.exploring && p.pos.x > 25.0 && p.pos.y >= 76.0 {
+                    p.exploring = true;
+                    p.sync_bossbar();
+                    p.push(action_bar(
+                        "✦ Chế độ Khám phá · Đi tới Đền Gacha hoặc Parkour 8 chặng! ✦",
+                        "green",
+                    ));
+                }
+
+                if p.exploring {
+                    // Rơi khỏi đảo -> quay về Checkpoint gần nhất
+                    if p.pos.y < 58.0 || p.pos.x.abs() > 84.0 || p.pos.z.abs() > 84.0 {
+                        p.warp(p.parkour_anchor);
+                        p.push(action_bar("Đã quay về điểm lưu Parkour!", "yellow"));
+                    } else {
+                        // Tương tác Đền Gacha (43, 78, 0)
+                        let gdx = p.pos.x - (GACHA_SHRINE.0 as f64 + 0.5);
+                        let gdz = p.pos.z - (GACHA_SHRINE.2 as f64 + 0.5);
+                        let gdy = (p.pos.y - GACHA_SHRINE.1 as f64).abs();
+                        if gdx.hypot(gdz) <= 3.8 && gdy <= 2.5 {
+                            if p.punch && now >= p.gacha_cd && p.gacha.is_none() {
+                                gacha_triggers.push(p.id);
+                            } else if p.gacha.is_none() && now % 500 < 50 {
+                                p.push(action_bar(
+                                    &format!(
+                                        "✦ Đền Gacha · Nhấp chuột hoặc gõ !gacha ({} Xu/lượt · Bạn có {} Xu) ✦",
+                                        GACHA_COST, p.coins
+                                    ),
+                                    "gold",
+                                ));
+                            }
+                        }
+
+                        // Kiểm tra chạm Checkpoint Parkour kế tiếp
+                        if p.cp < PARKOUR_CHECKPOINTS.len() {
+                            let (cx, cy, cz, cp_name) = PARKOUR_CHECKPOINTS[p.cp];
+                            let d = (p.pos.x - cx as f64 - 0.5).hypot(p.pos.z - cz as f64 - 0.5);
+                            if d <= 3.0 && (p.pos.y - cy as f64).abs() <= 2.5 {
+                                p.cp += 1;
+                                p.parkour_anchor =
+                                    Pos::at(cx as f64 + 0.5, cy as f64, cz as f64 + 0.5);
+                                if p.cp == PARKOUR_CHECKPOINTS.len() {
+                                    p.coins += 30;
+                                    p.wins += 1;
+                                    p.cp = 0;
+                                    p.parkour_anchor = Pos::at(
+                                        PARKOUR_START.0 as f64 + 0.5,
+                                        PARKOUR_START.1 as f64,
+                                        PARKOUR_START.2 as f64 + 0.5,
+                                    );
+                                    p.push(title(
+                                        "CHINH PHỤC ĐỈNH KHẢI HOÀN!",
+                                        "+30 Xu · Bạn đã hoàn thành 8 chặng Parkour!",
+                                        "gold",
+                                    ));
+                                    broadcasts.push(format!(
+                                        "✦ {} đã chinh phục Đỉnh Khải Hoàn Parkour (+30 Xu)!",
+                                        p.display_name()
+                                    ));
+                                } else {
+                                    p.coins += 5;
+                                    p.push(title(
+                                        &format!("CHẶNG {}/8", p.cp),
+                                        &format!("{cp_name} · +5 Xu"),
+                                        "green",
+                                    ));
+                                }
+                                p.sync_bossbar();
+                            }
+                        }
+                    }
+                } else if p.pos.y < 77.
                     || p.pos.y > 85.
                     || p.pos.x < 17.
-                    || p.pos.x > 25.
-                    || p.pos.z.abs() > 4.)
-            {
-                p.warp(LOBBY)
+                    || p.pos.z.abs() > 4.
+                {
+                    p.warp(LOBBY)
+                }
             }
         }
+
+        for id in gacha_triggers {
+            self.open_gacha(id);
+        }
+        for msg in broadcasts {
+            self.cast(chat(&msg));
+        }
+
         if now >= self.keep {
             self.keep = now + 12000;
             self.cast(packet(0x2d, &now.to_be_bytes()))
@@ -344,7 +653,7 @@ impl Arena {
             let ids: Vec<_> = self
                 .players
                 .values()
-                .filter(|p| p.ready)
+                .filter(|p| p.ready && !p.exploring)
                 .map(|p| p.id)
                 .collect();
             if ids.is_empty() {
@@ -361,6 +670,8 @@ impl Arena {
                     if game == Game::Rally {
                         let map = crate::world::frames(true);
                         for p in self.players.values_mut() {
+                            p.exploring = false;
+                            p.sync_bossbar();
                             p.send(map.clone());
                             if !r.runners.contains_key(&p.id) {
                                 p.warp(crate::course::balcony());
@@ -429,6 +740,9 @@ impl Arena {
             for p in self.players.values_mut() {
                 let (hint, value) = if let Some(r) = &self.round {
                     let personal = match r.runners.get(&p.id) {
+                        None if p.exploring => {
+                            format!("Parkour {}/8", p.cp)
+                        }
                         None => "Khán giả".into(),
                         Some(v) if !v.alive => "Đã bị loại".into(),
                         Some(v) if game == Game::Rally => {
@@ -449,6 +763,12 @@ impl Arena {
                         },
                         personal,
                     )
+                } else if p.exploring {
+                    let next = PARKOUR_CHECKPOINTS[p.cp.min(PARKOUR_CHECKPOINTS.len() - 1)];
+                    (
+                        format!("→ {} ({},{})", next.3, next.0, next.2),
+                        format!("Parkour {}/8", p.cp),
+                    )
                 } else {
                     (
                         format!(
@@ -463,7 +783,7 @@ impl Arena {
                     format!("Online {online} · Còn {live}"),
                     hint,
                     value,
-                    format!("Thắng phiên này: {}", p.wins),
+                    format!("Thắng: {} · Xu: {}", p.wins, p.coins),
                 ];
                 let mut msg = vec![];
                 for (i, s) in rows.iter().enumerate() {

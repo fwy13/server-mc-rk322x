@@ -139,7 +139,7 @@ fn chunk(x: i32, z: i32, template: &[u8], edits: &[(i32, i32, i32, i32)], race: 
         }
         assert_eq!(sky.len(), count);
         let mut masks = masks;
-        for idx in 9..=12 {
+        for idx in 9..=14 {
             if !sky.contains_key(&idx) {
                 sky.insert(idx, vec![255; 2048]);
                 if masks[0].len() < 2 {
@@ -188,21 +188,24 @@ pub fn build_world_frames(race: bool) -> Vec<u8> {
             }
         }
     }
-    if race {
-        for ((x, y, z), v) in layout::landscape() {
-            edits
-                .entry((x >> 4, z >> 4))
-                .or_default()
-                .push((x, y, z, v));
-        }
+    let extra = if race {
+        layout::landscape()
+    } else {
+        layout::parkour_world()
+    };
+    for ((x, y, z), v) in extra {
+        edits
+            .entry((x >> 4, z >> 4))
+            .or_default()
+            .push((x, y, z, v));
     }
     let mut out = packet(12, &[]);
     let mut count = 0;
-    for x in -3..=4 {
-        for z in -3..=3 {
+    for x in -5..=5 {
+        for z in -5..=5 {
             let t = templates.get(&(x, z)).unwrap_or(&templates[&(-2, -2)]);
             let e = edits.get(&(x, z)).map_or(&[][..], |v| v.as_slice());
-            out.extend(chunk(x, z, t, e, race && e.iter().any(|p| p.1 >= 80)));
+            out.extend(chunk(x, z, t, e, e.iter().any(|p| p.1 >= 80)));
             count += 1;
         }
     }
