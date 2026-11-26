@@ -1,0 +1,7 @@
+cargo:rerun-if-changed=assets/world.frames
+cargo:rerun-if-changed=src/layout.rs
+cargo:rerun-if-changed=src/colors.rs
+cargo:rerun-if-changed=src/materials.rs
+cargo:rerun-if-changed=src/wire.rs
+cargo:rerun-if-changed=src/course.rs
+cargo:rerun-if-changed=build.rs
