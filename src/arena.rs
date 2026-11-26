@@ -14,6 +14,7 @@ struct Player {
     punch: bool,
     wins: i32,
     rows: [String; 5],
+    menu_open: bool,
 }
 impl Player {
     fn send(&self, data: Shared) {
@@ -100,8 +101,38 @@ impl Arena {
     pub fn event(&mut self, event: Event) {
         match event {
             Event::Chat(id, msg) => {
+                if msg == "!menu" {
+                    if let Some(p) = self.players.get_mut(&id) {
+                        p.menu_open = true;
+                        p.send(crate::menu::open_packets());
+                    }
+                    return;
+                }
                 if let Some(p) = self.players.get(&id) {
                     self.cast(chat(&format!("<{}> {}", p.g.name, msg)));
+                }
+            }
+            Event::MenuClose(id) => {
+                if let Some(p) = self.players.get_mut(&id) {
+                    p.menu_open = false;
+                }
+            }
+            Event::MenuClick(id, slot) => {
+                let Some(p) = self.players.get_mut(&id) else {
+                    return;
+                };
+                if !p.menu_open {
+                    return;
+                }
+                p.menu_open = false;
+                p.push(crate::menu::close_packet());
+                if let Some(&game) = GAMES.get(slot as usize) {
+                    if let Some(pos) = self.list.iter().position(|&g| g == game) {
+                        self.index = pos;
+                        let name = game.meta().1;
+                        let who = p.g.name.clone();
+                        self.cast(chat(&format!("{who} đã chọn ván kế: {name}")));
+                    }
                 }
             }
             Event::Leave(id) => {
@@ -139,6 +170,7 @@ impl Arena {
                     punch: false,
                     wins: 0,
                     rows: Default::default(),
+                    menu_open: false,
                 };
                 let mut join = include_bytes!("../assets/join.bin").to_vec();
                 join[..4].copy_from_slice(&id.to_be_bytes());

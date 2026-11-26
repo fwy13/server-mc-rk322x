@@ -2,6 +2,13 @@ mod arena;
 mod colors;
 mod course;
 mod games;
+#[cfg(not(feature = "prebaked"))]
+mod layout;
+#[cfg(not(feature = "prebaked"))]
+mod mapgen;
+#[cfg(not(feature = "prebaked"))]
+mod materials;
+mod menu;
 mod net;
 mod wire;
 mod world;

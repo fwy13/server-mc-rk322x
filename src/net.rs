@@ -28,6 +28,8 @@ pub enum Event {
     Join(i32, Guest),
     Leave(i32),
     Chat(i32, String),
+    MenuClick(i32, i16),
+    MenuClose(i32),
 }
 pub const LOBBY: Pos = Pos {
     x: 21.5,
@@ -171,6 +173,17 @@ pub fn connect(
                         let _ = events.try_send(Event::Chat(id, message));
                         last_chat = Some(now);
                     }
+                }
+                0x10 => {
+                    let win_id = int(&mut data)?;
+                    let _state_id = int(&mut data)?;
+                    let slot = i16::from_be_bytes(take(&mut data, 2)?.try_into().unwrap());
+                    if win_id == crate::menu::WINDOW_ID as i32 {
+                        let _ = events.try_send(Event::MenuClick(id, slot));
+                    }
+                }
+                0x11 => {
+                    let _ = events.try_send(Event::MenuClose(id));
                 }
                 0 => {
                     let k = int(&mut data)?;
