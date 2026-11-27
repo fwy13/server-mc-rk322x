@@ -28,6 +28,8 @@ fn main() -> io::Result<()> {
     let mut playlist = GAMES.to_vec();
     let mut max = 50usize;
     let mut stats = false;
+    let mut peer: Option<SocketAddrV4> = None;
+    let mut is_hub = true;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -39,7 +41,7 @@ fn main() -> io::Result<()> {
                 return Ok(());
             }
             "--help" | "-h" => {
-                println!("rk-festival --listen LAN_IP:25565 --game all|color,tnt,... --max-players 50 --stats\nrk-festival --list");
+                println!("rk-festival --listen LAN_IP:25565 --game all|color,tnt,... --max-players 50 --peer PEER_IP:25565 --role hub|arena --stats\nrk-festival --list");
                 return Ok(());
             }
             "--listen" => {
@@ -56,6 +58,21 @@ fn main() -> io::Result<()> {
                     .ok_or_else(wire::invalid)?
             }
             "--stats" => stats = true,
+            "--peer" => {
+                peer = Some(
+                    args.next()
+                        .and_then(|s| s.parse().ok())
+                        .ok_or_else(wire::invalid)?,
+                );
+            }
+            "--role" => {
+                let role = args.next().ok_or_else(wire::invalid)?;
+                is_hub = match role.as_str() {
+                    "hub" => true,
+                    "arena" => false,
+                    _ => return Err(wire::invalid()),
+                };
+            }
             "--game" => {
                 let s = args.next().ok_or_else(wire::invalid)?;
                 if s != "all" {
@@ -117,7 +134,9 @@ fn main() -> io::Result<()> {
         }
     });
     println!(
-        "RK Festival Java 26.3 · {addr} · {} trò · {max} chỗ",
+        "RK Festival Java 26.3 · {addr} · role={} · peer={:?} · {} trò · {max} chỗ",
+        if is_hub { "hub" } else { "arena" },
+        peer,
         playlist.len()
     );
     let mut arena = arena::Arena::new(
@@ -127,6 +146,8 @@ fn main() -> io::Result<()> {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos() as u64,
+        peer,
+        is_hub,
     );
     let base = Instant::now();
     let mut next = base;

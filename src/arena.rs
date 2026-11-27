@@ -8,9 +8,92 @@ use crate::{
     net::{Event, Guest, Shared, LOBBY},
     wire::*,
 };
-use std::{collections::BTreeMap, net::Shutdown, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    net::{Shutdown, SocketAddrV4},
+    sync::{Arc, OnceLock},
+};
 
 const BOSS_UUID: [u8; 16] = *b"RKFESTIVALPARK01";
+const HOLO_BASE_ID: i32 = 100_000;
+
+fn holo_uuid(i: usize) -> [u8; 16] {
+    let mut u = *b"RKHOLOGRAMTEXT00";
+    u[14] = (i / 10) as u8 + b'0';
+    u[15] = (i % 10) as u8 + b'0';
+    u[6] = (u[6] & 15) | 64;
+    u[8] = (u[8] & 63) | 128;
+    u
+}
+
+fn holograms_spawn() -> Shared {
+    static CACHE: OnceLock<Shared> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let mut entries: Vec<(Pos, String, &'static str)> = vec![
+                (
+                    Pos::at(24.5, 81.3, 0.5),
+                    "✦ RK FESTIVAL · S905L HUB ✦".into(),
+                    "gold",
+                ),
+                (
+                    Pos::at(24.5, 80.8, 0.5),
+                    "Qua cầu khám phá Parkour · Gõ !menu chọn trò".into(),
+                    "aqua",
+                ),
+                (
+                    Pos::at(43.5, 81.5, 0.5),
+                    "★ ĐỀN GACHA KIM CƯƠNG ★".into(),
+                    "gold",
+                ),
+                (
+                    Pos::at(43.5, 81.0, 0.5),
+                    "Nhấp chuột hoặc gõ !gacha (10 Xu/lượt)".into(),
+                    "yellow",
+                ),
+                (
+                    Pos::at(56.5, 81.8, 0.5),
+                    "✦ PARKOUR 8 CHẶNG TRÊN KHÔNG ✦".into(),
+                    "green",
+                ),
+                (
+                    Pos::at(56.5, 81.3, 0.5),
+                    "+5 Xu/chặng · +30 Xu tại Đỉnh Khải Hoàn".into(),
+                    "white",
+                ),
+            ];
+            for (i, &(cx, cy, cz, name)) in PARKOUR_CHECKPOINTS.iter().enumerate().skip(1) {
+                let color = if i + 1 == PARKOUR_CHECKPOINTS.len() {
+                    "gold"
+                } else {
+                    "aqua"
+                };
+                entries.push((
+                    Pos::at(cx as f64 + 0.5, cy as f64 + 2.4, cz as f64 + 0.5),
+                    format!("✦ Chặng {}/8: {name} ✦", i + 1),
+                    color,
+                ));
+            }
+            let mut out = vec![];
+            for (i, (pos, text, color)) in entries.into_iter().enumerate() {
+                out.extend(hologram_spawn(
+                    HOLO_BASE_ID + i as i32,
+                    &holo_uuid(i),
+                    pos,
+                    &text,
+                    color,
+                ));
+            }
+            Shared::from(out)
+        })
+        .clone()
+}
+
+fn holograms_remove() -> Buf {
+    let total = 6 + PARKOUR_CHECKPOINTS.len() - 1;
+    let ids: Vec<i32> = (0..total).map(|i| HOLO_BASE_ID + i as i32).collect();
+    remove_entities(&ids)
+}
 
 struct Player {
     id: i32,
@@ -23,6 +106,7 @@ struct Player {
     wins: i32,
     coins: i32,
     badge: &'static str,
+    hotbar_next: i32,
     exploring: bool,
     cp: usize,
     parkour_anchor: Pos,
@@ -68,6 +152,10 @@ impl Player {
             format!("{} {}", self.badge, self.g.name)
         }
     }
+    fn give_item(&mut self, item_id: i32, count: i32) {
+        self.push(set_hotbar_item(self.hotbar_next, item_id, count));
+        self.hotbar_next = (self.hotbar_next + 1) % 9;
+    }
     fn sync_bossbar(&mut self) {
         if self.exploring {
             let total = PARKOUR_CHECKPOINTS.len();
@@ -95,6 +183,8 @@ pub struct Arena {
     index: usize,
     round: Option<Round>,
     seed: u64,
+    peer: Option<SocketAddrV4>,
+    is_hub: bool,
     now: u64,
     floor: [i32; N],
     lower: [i32; N],
@@ -107,7 +197,13 @@ pub struct Arena {
     results_until: u64,
 }
 impl Arena {
-    pub fn new(max: usize, list: Vec<Game>, seed: u64) -> Self {
+    pub fn new(
+        max: usize,
+        list: Vec<Game>,
+        seed: u64,
+        peer: Option<SocketAddrV4>,
+        is_hub: bool,
+    ) -> Self {
         Self {
             players: BTreeMap::new(),
             max,
@@ -115,6 +211,8 @@ impl Arena {
             index: 0,
             round: None,
             seed,
+            peer,
+            is_hub,
             now: 0,
             floor: [WHITE; N],
             lower: [0; N],
@@ -149,7 +247,22 @@ impl Arena {
             .wrapping_add(1442695040888963407);
         self.seed
     }
+    fn transfer_peer(&self, id: i32, reason: &str) {
+        let (Some(peer), Some(p)) = (self.peer, self.players.get(&id)) else {
+            return;
+        };
+        p.push(chat(&format!(
+            "✦ Đang chuyển sang máy chủ {peer}: {reason}..."
+        )));
+        p.push(transfer(&peer.ip().to_string(), peer.port()));
+    }
     fn open_gacha(&mut self, id: i32) {
+        if !self.is_hub {
+            if self.peer.is_some() {
+                self.transfer_peer(id, "Đền Gacha (S905L Hub)");
+            }
+            return;
+        }
         let now = self.now;
         let seed = self.next_seed() ^ (id as u64).wrapping_mul(0x9e3779b97f4a7c15);
         let Some(p) = self.players.get_mut(&id) else {
@@ -172,12 +285,18 @@ impl Arena {
         p.gacha_cd = now + 1500;
         let spin = GachaSpin::new(seed, now);
         p.push([open_gacha_screen(), spin.frame()].concat());
-        p.push(action_bar("✦ Đang quay rương Gacha... ✦", "gold"));
+        p.push(action_bar("✦ Đang quay rương Gacha Kim Cương... ✦", "gold"));
         p.menu = Some(MenuKind::Gacha);
         p.gacha = Some(spin);
         p.sync_bossbar();
     }
     fn enter_parkour(&mut self, id: i32) {
+        if !self.is_hub {
+            if self.peer.is_some() {
+                self.transfer_peer(id, "Khám phá & Parkour (S905L Hub)");
+            }
+            return;
+        }
         if let Some(p) = self.players.get_mut(&id) {
             p.exploring = true;
             let start = Pos::at(
@@ -198,6 +317,10 @@ impl Arena {
         }
     }
     fn leave_parkour(&mut self, id: i32) {
+        if !self.is_hub && self.peer.is_some() {
+            self.transfer_peer(id, "Sảnh chính (S905L Hub)");
+            return;
+        }
         if let Some(p) = self.players.get_mut(&id) {
             p.exploring = false;
             p.sync_bossbar();
@@ -245,6 +368,7 @@ impl Arena {
                             if !prize.badge.is_empty() {
                                 p.badge = prize.badge;
                             }
+                            p.give_item(prize.icon, prize.count);
                             p.push(chat(&format!("✦ Gacha: Bạn nhận được {}!", prize.name)));
                             p.sync_bossbar();
                         }
@@ -261,7 +385,6 @@ impl Arena {
                         if let Some(p) = self.players.get_mut(&id) {
                             if let Some(spin) = &p.gacha {
                                 if !spin.is_done() {
-                                    // Chống desync item khi rương đang quay
                                     p.push(spin.frame());
                                     return;
                                 }
@@ -296,6 +419,8 @@ impl Arena {
                                     let who = p.display_name();
                                     self.cast(chat(&format!("{who} đã chọn ván kế: {name}")));
                                 }
+                            } else if self.peer.is_some() {
+                                self.transfer_peer(id, game.meta().1);
                             }
                         }
                     }
@@ -342,6 +467,7 @@ impl Arena {
                     wins: 0,
                     coins: 30,
                     badge: "",
+                    hotbar_next: 0,
                     exploring: false,
                     cp: 0,
                     parkour_anchor: start_anchor,
@@ -357,13 +483,16 @@ impl Arena {
                     [
                         packet(0x32, &join),
                         packet(0x27, &[13, 0, 0, 0, 0]),
-                        packet(0x61, &[8]),
+                        packet(0x61, &[if self.is_hub { 8 } else { 6 }]),
                         packet(0x60, &[0, 0]),
                     ]
                     .concat(),
                 );
                 let rally = self.round.as_ref().is_some_and(|r| r.game == Game::Rally);
                 p.send(crate::world::frames(rally));
+                if self.is_hub && !rally {
+                    p.send(holograms_spawn());
+                }
                 let mut all = vec![];
                 for k in 0..N {
                     let x = (k % 18) as i32 - 9;
@@ -384,7 +513,11 @@ impl Arena {
                 self.cast([info(&p.g.uuid, &p.g.name), spawn(id, &p.g.uuid, p.pos)].concat());
                 all.extend(board());
                 all.extend(title(
-                    "RK FESTIVAL",
+                    if self.is_hub {
+                        "RK FESTIVAL · HUB"
+                    } else {
+                        "RK FESTIVAL · ARENA"
+                    },
                     if self.round.is_some() {
                         "Bạn sẽ chơi ở ván kế"
                     } else {
@@ -394,7 +527,7 @@ impl Arena {
                 ));
                 p.push(all);
                 p.push(chat(
-                    "Lệnh: !menu (chọn trò) · !parkour (khám phá) · !gacha (quay rương 10 Xu) · !lobby",
+                    "Lệnh: !menu (chọn trò/chuyển server) · !parkour · !gacha (10 Xu) · !lobby",
                 ));
                 if self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
                     p.warp(crate::course::balcony());
@@ -455,8 +588,16 @@ impl Arena {
         }
         if self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
             let clear = crate::world::frames(false);
+            let holos = if self.is_hub {
+                Some(holograms_spawn())
+            } else {
+                None
+            };
             for p in self.players.values() {
                 p.send(clear.clone());
+                if let Some(h) = &holos {
+                    p.send(h.clone());
+                }
             }
         }
         self.round = None;
@@ -497,6 +638,7 @@ impl Arena {
                 if !prize.badge.is_empty() {
                     p.badge = prize.badge;
                 }
+                p.give_item(prize.icon, prize.count);
                 p.push(title("TRÚNG THƯỞNG!", prize.name, prize.color));
                 p.push(action_bar(
                     &format!("✦ Gacha: {} · Tổng: {} Xu ✦", prize.name, p.coins),
@@ -537,8 +679,8 @@ impl Arena {
                     p.warp(crate::course::balcony());
                 }
             } else if !active && p.ready {
-                // Tự động vào chế độ Khám phá / Parkour khi bước qua cầu gỗ (x > 25)
-                if !p.exploring && p.pos.x > 25.0 && p.pos.y >= 76.0 {
+                // Chỉ Hub (S905L) mở cầu gỗ sang Đảo Khám Phá & Parkour
+                if self.is_hub && !p.exploring && p.pos.x > 25.0 && p.pos.y >= 76.0 {
                     p.exploring = true;
                     p.sync_bossbar();
                     p.push(action_bar(
@@ -548,12 +690,10 @@ impl Arena {
                 }
 
                 if p.exploring {
-                    // Rơi khỏi đảo -> quay về Checkpoint gần nhất
                     if p.pos.y < 58.0 || p.pos.x.abs() > 84.0 || p.pos.z.abs() > 84.0 {
                         p.warp(p.parkour_anchor);
                         p.push(action_bar("Đã quay về điểm lưu Parkour!", "yellow"));
                     } else {
-                        // Tương tác Đền Gacha (43, 78, 0)
                         let gdx = p.pos.x - (GACHA_SHRINE.0 as f64 + 0.5);
                         let gdz = p.pos.z - (GACHA_SHRINE.2 as f64 + 0.5);
                         let gdy = (p.pos.y - GACHA_SHRINE.1 as f64).abs();
@@ -571,7 +711,6 @@ impl Arena {
                             }
                         }
 
-                        // Kiểm tra chạm Checkpoint Parkour kế tiếp
                         if p.cp < PARKOUR_CHECKPOINTS.len() {
                             let (cx, cy, cz, cp_name) = PARKOUR_CHECKPOINTS[p.cp];
                             let d = (p.pos.x - cx as f64 - 0.5).hypot(p.pos.z - cz as f64 - 0.5);
@@ -609,7 +748,12 @@ impl Arena {
                             }
                         }
                     }
-                } else if p.pos.y < 77. || p.pos.y > 85. || p.pos.x < 17. || p.pos.z.abs() > 4. {
+                } else if p.pos.y < 77.
+                    || p.pos.y > 85.
+                    || p.pos.x < 17.
+                    || (!self.is_hub && p.pos.x > 25.)
+                    || p.pos.z.abs() > 4.
+                {
                     p.warp(LOBBY)
                 }
             }
@@ -675,6 +819,9 @@ impl Arena {
                     self.announce(name, rules, "gold");
                     if game == Game::Rally {
                         let map = crate::world::frames(true);
+                        if self.is_hub {
+                            self.cast(holograms_remove());
+                        }
                         for p in self.players.values_mut() {
                             p.exploring = false;
                             p.sync_bossbar();

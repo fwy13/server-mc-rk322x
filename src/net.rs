@@ -73,7 +73,7 @@ pub fn connect(
         }
         return Ok(());
     }
-    if state != 2 || ver != 777 {
+    if (state != 2 && state != 3) || ver != 777 {
         return Err(invalid());
     }
     let (i, b) = read_packet(&mut r)?;

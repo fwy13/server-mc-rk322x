@@ -23,14 +23,37 @@ pub enum MenuKind {
     Gacha,
 }
 
+// Item protocol ID chuẩn từ Minecraft Java 26.3 registries.json.
+const ITEM_GLASS_PANE: i32 = 628;
+const ITEM_HOPPER: i32 = 834;
+const ITEM_CHEST: i32 = 404;
+const ITEM_COMPASS: i32 = 1151;
+const ITEM_IRON_INGOT: i32 = 1018;
+const ITEM_GOLD_INGOT: i32 = 1022;
+const ITEM_EMERALD: i32 = 1013;
+const ITEM_DIAMOND: i32 = 1012;
+const ITEM_NETHERITE_INGOT: i32 = 1023;
+const ITEM_ENCHANTED_APPLE: i32 = 1101;
+const ITEM_NETHER_STAR: i32 = 1391;
+const ITEM_TOTEM: i32 = 1454;
+
 const ICONS: [i32; 15] = [
-    160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174,
+    ITEM_GOLD_INGOT,
+    ITEM_EMERALD,
+    ITEM_DIAMOND,
+    ITEM_IRON_INGOT,
+    ITEM_COMPASS,
+    ITEM_NETHER_STAR,
+    ITEM_ENCHANTED_APPLE,
+    ITEM_CHEST,
+    ITEM_GOLD_INGOT,
+    ITEM_DIAMOND,
+    ITEM_EMERALD,
+    ITEM_IRON_INGOT,
+    ITEM_TOTEM,
+    ITEM_NETHERITE_INGOT,
+    ITEM_COMPASS,
 ];
-const ICON_BORDER: i32 = 160;
-const ICON_POINTER: i32 = 164;
-const ICON_PARKOUR: i32 = 165;
-const ICON_GACHA: i32 = 170;
-const ICON_LOBBY: i32 = 163;
 
 pub struct GachaPrize {
     pub name: &'static str,
@@ -38,21 +61,22 @@ pub struct GachaPrize {
     pub badge: &'static str,
     pub coins: i32,
     pub icon: i32,
+    pub count: i32,
     pub weight: u32,
     pub legendary: bool,
 }
 
 pub const PRIZES: [GachaPrize; 10] = [
-    GachaPrize { name: "+5 Xu an ủi", color: "white", badge: "", coins: 5, icon: 160, weight: 22, legendary: false },
-    GachaPrize { name: "+12 Xu may mắn", color: "green", badge: "", coins: 12, icon: 161, weight: 18, legendary: false },
-    GachaPrize { name: "Danh hiệu [Tân Binh]", color: "white", badge: "[Tân Binh]", coins: 5, icon: 162, weight: 15, legendary: false },
-    GachaPrize { name: "+20 Xu bạc", color: "aqua", badge: "", coins: 20, icon: 163, weight: 12, legendary: false },
-    GachaPrize { name: "Danh hiệu [Thợ Săn]", color: "aqua", badge: "[Thợ Săn]", coins: 8, icon: 165, weight: 9, legendary: false },
-    GachaPrize { name: "Danh hiệu [Phong Vân]", color: "aqua", badge: "[Phong Vân]", coins: 10, icon: 166, weight: 7, legendary: false },
-    GachaPrize { name: "+35 Xu vàng", color: "light_purple", badge: "", coins: 35, icon: 168, weight: 6, legendary: false },
-    GachaPrize { name: "Danh hiệu [Băng Vương]", color: "light_purple", badge: "[Băng Vương]", coins: 15, icon: 169, weight: 4, legendary: false },
-    GachaPrize { name: "Danh hiệu [Hỏa Long]", color: "gold", badge: "[Hỏa Long]", coins: 20, icon: 171, weight: 3, legendary: false },
-    GachaPrize { name: "★ HUYỀN THOẠI ★ (+100 Xu)", color: "gold", badge: "[★HUYỀN THOẠI★]", coins: 100, icon: 174, weight: 4, legendary: true },
+    GachaPrize { name: "Phôi Sắt x3 (+5 Xu)", color: "white", badge: "", coins: 5, icon: ITEM_IRON_INGOT, count: 3, weight: 22, legendary: false },
+    GachaPrize { name: "Thỏi Vàng x2 (+12 Xu)", color: "yellow", badge: "", coins: 12, icon: ITEM_GOLD_INGOT, count: 2, weight: 18, legendary: false },
+    GachaPrize { name: "Danh hiệu [Tân Binh] + Thỏi Vàng", color: "white", badge: "[Tân Binh]", coins: 5, icon: ITEM_GOLD_INGOT, count: 1, weight: 15, legendary: false },
+    GachaPrize { name: "Ngọc Lục Bảo x2 (+20 Xu)", color: "green", badge: "", coins: 20, icon: ITEM_EMERALD, count: 2, weight: 12, legendary: false },
+    GachaPrize { name: "Danh hiệu [Thợ Săn] + Ngọc Lục Bảo", color: "aqua", badge: "[Thợ Săn]", coins: 8, icon: ITEM_EMERALD, count: 1, weight: 9, legendary: false },
+    GachaPrize { name: "Kim Cương x1 (+25 Xu)", color: "aqua", badge: "", coins: 25, icon: ITEM_DIAMOND, count: 1, weight: 8, legendary: false },
+    GachaPrize { name: "Táo Vàng Phù Phép (+35 Xu)", color: "light_purple", badge: "[Băng Vương]", coins: 35, icon: ITEM_ENCHANTED_APPLE, count: 1, weight: 6, legendary: false },
+    GachaPrize { name: "Totem Bất Tử + [Phong Vân]", color: "gold", badge: "[Phong Vân]", coins: 25, icon: ITEM_TOTEM, count: 1, weight: 4, legendary: false },
+    GachaPrize { name: "Thỏi Netherite + [Hỏa Long]", color: "gold", badge: "[Hỏa Long]", coins: 40, icon: ITEM_NETHERITE_INGOT, count: 1, weight: 3, legendary: false },
+    GachaPrize { name: "★ HUYỀN THOẠI ★ Sao Nether (+100 Xu)", color: "gold", badge: "[★HUYỀN THOẠI★]", coins: 100, icon: ITEM_NETHER_STAR, count: 1, weight: 3, legendary: true },
 ];
 
 const SPIN_DELAYS_MS: [u64; 17] = [
@@ -88,7 +112,7 @@ impl GachaSpin {
         for slot in &mut reel {
             *slot = roll_prize(&mut rng);
         }
-        // Khi step dừng ở 17 (tổng 17 bước quay), ô giữa (slot 13) là reel[17 + 4] = reel[21].
+        // Khi step dừng ở 17, ô giữa (slot 13) là reel[17 + 4] = reel[21].
         let prize_idx = reel[21];
         Self {
             reel,
@@ -125,12 +149,12 @@ impl GachaSpin {
         content.extend(vi(27));
         for i in 0..27 {
             let item = match i {
-                4 | 22 => Some(ICON_POINTER),
+                4 | 22 => Some((ITEM_HOPPER, 1)),
                 9..=17 => {
-                    let idx = self.reel[self.step + (i - 9)];
-                    Some(PRIZES[idx].icon)
+                    let p = &PRIZES[self.reel[self.step + (i - 9)]];
+                    Some((p.icon, p.count))
                 }
-                _ => Some(ICON_BORDER),
+                _ => Some((ITEM_GLASS_PANE, 1)),
             };
             content.extend(slot(item));
         }
@@ -139,11 +163,11 @@ impl GachaSpin {
     }
 }
 
-fn slot(item_id: Option<i32>) -> Buf {
-    match item_id {
+fn slot(item: Option<(i32, i32)>) -> Buf {
+    match item {
         None => vi(0),
-        Some(id) => {
-            let mut b = vi(1);
+        Some((id, count)) => {
+            let mut b = vi(count);
             b.extend(vi(id));
             b.extend(vi(0));
             b.extend(vi(0));
@@ -165,13 +189,13 @@ pub fn open_packets() -> Shared {
             content.extend(vi(27));
             for i in 0..27 {
                 let item = if i < GAMES.len() {
-                    Some(ICONS[i])
+                    Some((ICONS[i], 1))
                 } else if i as i16 == SLOT_PARKOUR {
-                    Some(ICON_PARKOUR)
+                    Some((ITEM_COMPASS, 1))
                 } else if i as i16 == SLOT_GACHA {
-                    Some(ICON_GACHA)
+                    Some((ITEM_CHEST, 1))
                 } else if i as i16 == SLOT_LOBBY {
-                    Some(ICON_LOBBY)
+                    Some((ITEM_NETHER_STAR, 1))
                 } else {
                     None
                 };
@@ -193,7 +217,7 @@ pub fn open_packets() -> Shared {
 pub fn open_gacha_screen() -> Buf {
     let mut open = vi(WINDOW_ID as i32);
     open.extend(vi(GENERIC_9X3));
-    open.extend(component("✦ RƯƠNG GACHA MAY MẮN ✦", "gold"));
+    open.extend(component("✦ RƯƠNG GACHA KIM CƯƠNG ✦", "gold"));
     packet(CB_OPEN_SCREEN, &open)
 }
 

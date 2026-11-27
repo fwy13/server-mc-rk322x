@@ -222,3 +222,46 @@ pub fn boss_bar_remove(uuid: &[u8; 16]) -> Buf {
     b.extend(vi(1));
     packet(0x09, &b)
 }
+
+pub fn transfer(host: &str, port: u16) -> Buf {
+    let mut b = string(host);
+    b.extend(vi(port as i32));
+    packet(0x84, &b)
+}
+pub fn set_hotbar_item(slot_idx: i32, item_id: i32, count: i32) -> Buf {
+    let mut b = vi(slot_idx);
+    b.extend(vi(count));
+    b.extend(vi(item_id));
+    b.extend(vi(0));
+    b.extend(vi(0));
+    packet(0x6e, &b)
+}
+pub fn hologram_spawn(entity_id: i32, uuid: &[u8; 16], p: Pos, text: &str, color: &str) -> Buf {
+    let mut add = vi(entity_id);
+    add.extend(uuid);
+    add.extend(vi(135)); // minecraft:text_display (26.3 protocol 777)
+    add.extend(p.xyz());
+    add.extend([0; 5]);
+
+    let mut meta = vi(entity_id);
+    // Index 15: billboard_render_constraints (BYTE=0) -> 3 = CENTER (luôn xoay về phía người chơi)
+    meta.extend([15, 0, 3]);
+    // Index 23: text (COMPONENT=5)
+    meta.extend([23, 5]);
+    meta.extend(component(text, color));
+    // Index 25: background_color (VARINT=1) -> nền đen bán trong suốt ARGB 0x60000000
+    meta.extend([25, 1]);
+    meta.extend(vi(0x6000_0000u32 as i32));
+    // Index 27: style_flags (BYTE=0) -> 1 = có bóng chữ (drop shadow)
+    meta.extend([27, 0, 1]);
+    meta.push(0xff);
+
+    [packet(1, &add), packet(0x65, &meta)].concat()
+}
+pub fn remove_entities(ids: &[i32]) -> Buf {
+    let mut b = vi(ids.len() as i32);
+    for &id in ids {
+        b.extend(vi(id));
+    }
+    packet(0x4e, &b)
+}
