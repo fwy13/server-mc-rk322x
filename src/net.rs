@@ -28,6 +28,7 @@ pub enum Event {
     Join(i32, Guest),
     Leave(i32),
     Chat(i32, String),
+    Command(i32, String),
     MenuClick(i32, i16),
     MenuClose(i32),
 }
@@ -184,6 +185,13 @@ pub fn connect(
                 }
                 0x13 => {
                     let _ = events.try_send(Event::MenuClose(id));
+                }
+                0x07 | 0x08 => {
+                    let raw = text(&mut data, 256)?;
+                    let cmd = raw.trim().to_ascii_lowercase();
+                    if !cmd.is_empty() {
+                        let _ = events.try_send(Event::Command(id, cmd));
+                    }
                 }
                 0 => {
                     let k = int(&mut data)?;

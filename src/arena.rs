@@ -16,6 +16,8 @@ use std::{
 
 const BOSS_UUID: [u8; 16] = *b"RKFESTIVALPARK01";
 const HOLO_BASE_ID: i32 = 100_000;
+const LB_HOLO_ID: i32 = 100_050;
+const LB_UUID: [u8; 16] = *b"RKLEADERBOARD001";
 
 fn holo_uuid(i: usize) -> [u8; 16] {
     let mut u = *b"RKHOLOGRAMTEXT00";
@@ -256,6 +258,31 @@ impl Arena {
         )));
         p.push(transfer(&peer.ip().to_string(), peer.port()));
     }
+    fn refresh_leaderboard(&self) {
+        if !self.is_hub || self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
+            return;
+        }
+        let mut board: Vec<(&str, i32, i32)> = self
+            .players
+            .values()
+            .map(|p| (p.g.name.as_str(), p.wins, p.coins))
+            .collect();
+        board.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
+        let mut text = String::from("★ BẢNG XẾP HẠNG RK FESTIVAL ★");
+        for (i, (name, wins, coins)) in board.into_iter().take(5).enumerate() {
+            text.push_str(&format!("\n#{} {} · {} Thắng · {} Xu", i + 1, name, wins, coins));
+        }
+        self.cast(hologram_text(LB_HOLO_ID, &text, "gold"));
+    }
+    fn tab_packet(&self, p: &Player) -> Buf {
+        let role = if self.is_hub { "S905L HUB" } else { "RK3229 ARENA" };
+        let header = format!("✦ RK FESTIVAL 26.3 · {role} ✦\nOnline: {} người", self.players.len());
+        let footer = format!(
+            "Xu: {} · Thắng: {}\nLệnh: /menu · /parkour · /gacha · /arena · /lobby",
+            p.coins, p.wins
+        );
+        tab_list(&header, &footer)
+    }
     fn open_gacha(&mut self, id: i32) {
         if !self.is_hub {
             if self.peer.is_some() {
@@ -330,6 +357,29 @@ impl Arena {
     }
     pub fn event(&mut self, event: Event) {
         match event {
+            Event::Command(id, cmd) => match cmd.as_str() {
+                "menu" => {
+                    if let Some(p) = self.players.get_mut(&id) {
+                        p.gacha = None;
+                        p.menu = Some(MenuKind::Games);
+                        p.send(open_packets());
+                        p.push(sound("minecraft:ui.button.click", p.pos, 0.7, 1.0));
+                    }
+                }
+                "gacha" => self.open_gacha(id),
+                "parkour" => self.enter_parkour(id),
+                "lobby" => self.leave_parkour(id),
+                "arena" => {
+                    if self.is_hub && self.peer.is_some() {
+                        self.transfer_peer(id, "Đấu trường Game nhẹ (RK3229)");
+                    }
+                }
+                _ => {
+                    if let Some(p) = self.players.get(&id) {
+                        p.push(chat("Lệnh: /menu · /parkour · /gacha · /lobby · /arena"));
+                    }
+                }
+            },
             Event::Chat(id, msg) => {
                 match msg.as_str() {
                     "!menu" => {
@@ -337,6 +387,7 @@ impl Arena {
                             p.gacha = None;
                             p.menu = Some(MenuKind::Games);
                             p.send(open_packets());
+                            p.push(sound("minecraft:ui.button.click", p.pos, 0.7, 1.0));
                         }
                         return;
                     }
@@ -350,6 +401,12 @@ impl Arena {
                     }
                     "!lobby" => {
                         self.leave_parkour(id);
+                        return;
+                    }
+                    "!arena" => {
+                        if self.is_hub && self.peer.is_some() {
+                            self.transfer_peer(id, "Đấu trường Game nhẹ (RK3229)");
+                        }
                         return;
                     }
                     _ => {}
@@ -492,6 +549,13 @@ impl Arena {
                 p.send(crate::world::frames(rally));
                 if self.is_hub && !rally {
                     p.send(holograms_spawn());
+                    p.push(hologram_spawn(
+                        LB_HOLO_ID,
+                        &LB_UUID,
+                        Pos::at(38.5, 81.2, -5.5),
+                        "★ BẢNG XẾP HẠNG RK FESTIVAL ★",
+                        "gold",
+                    ));
                 }
                 let mut all = vec![];
                 for k in 0..N {
@@ -525,9 +589,11 @@ impl Arena {
                     },
                     "gold",
                 ));
+                all.extend(commands_tree(&["menu", "parkour", "gacha", "lobby", "arena"]));
+                all.extend(self.tab_packet(&p));
                 p.push(all);
                 p.push(chat(
-                    "Lệnh: !menu (chọn trò/chuyển server) · !parkour · !gacha (10 Xu) · !lobby",
+                    "Lệnh: /menu · /parkour · /gacha (10 Xu) · /arena · /lobby",
                 ));
                 if self.round.as_ref().is_some_and(|r| r.game == Game::Rally) {
                     p.warp(crate::course::balcony());
@@ -535,6 +601,7 @@ impl Arena {
                     p.warp(LOBBY);
                 }
                 self.players.insert(id, p);
+                self.refresh_leaderboard();
             }
         }
     }
@@ -578,6 +645,7 @@ impl Arena {
             if let Some(p) = self.players.get_mut(&id) {
                 p.wins += 1;
                 p.coins += 10;
+                p.push(sound("minecraft:entity.player.levelup", p.pos, 1.0, 1.1));
             }
         }
         self.announce("KẾT THÚC", &msg, "gold");
@@ -604,7 +672,8 @@ impl Arena {
         self.start = None;
         self.countdown = 0;
         self.index = (self.index + 1) % self.list.len();
-        self.terrain()
+        self.terrain();
+        self.refresh_leaderboard();
     }
     pub fn tick(&mut self, now: u64) {
         self.now = now;
@@ -631,6 +700,7 @@ impl Arena {
             }
             if let Some(frame) = gacha_frame {
                 p.push(frame);
+                p.push(sound("minecraft:ui.button.click", p.pos, 0.6, 0.9 + (now % 5) as f32 * 0.08));
             }
             if let Some(idx) = gacha_prize {
                 let prize = &PRIZES[idx];
@@ -639,6 +709,12 @@ impl Arena {
                     p.badge = prize.badge;
                 }
                 p.give_item(prize.icon, prize.count);
+                let sfx = if prize.legendary {
+                    "minecraft:entity.firework_rocket.launch"
+                } else {
+                    "minecraft:entity.player.levelup"
+                };
+                p.push(sound(sfx, p.pos, 1.0, 1.1));
                 p.push(title("TRÚNG THƯỞNG!", prize.name, prize.color));
                 p.push(action_bar(
                     &format!("✦ Gacha: {} · Tổng: {} Xu ✦", prize.name, p.coins),
@@ -727,6 +803,7 @@ impl Arena {
                                         PARKOUR_START.1 as f64,
                                         PARKOUR_START.2 as f64 + 0.5,
                                     );
+                                    p.push(sound("minecraft:ui.toast.challenge_complete", p.pos, 1.0, 1.0));
                                     p.push(title(
                                         "CHINH PHỤC ĐỈNH KHẢI HOÀN!",
                                         "+30 Xu · Bạn đã hoàn thành 8 chặng Parkour!",
@@ -738,6 +815,7 @@ impl Arena {
                                     ));
                                 } else {
                                     p.coins += 5;
+                                    p.push(sound("minecraft:entity.experience_orb.pickup", p.pos, 0.9, 1.2));
                                     p.push(title(
                                         &format!("CHẶNG {}/8", p.cp),
                                         &format!("{cp_name} · +5 Xu"),
@@ -790,6 +868,7 @@ impl Arena {
                     Action::Out(id) => {
                         if let Some(p) = self.players.get_mut(&id) {
                             p.warp(LOBBY);
+                            p.push(sound("minecraft:block.anvil.land", p.pos, 0.6, 0.8));
                             p.push(title("ĐÃ BỊ LOẠI", "Theo dõi ván từ khán đài", "red"))
                         }
                     }
@@ -849,7 +928,10 @@ impl Arena {
                     if self.countdown != left {
                         self.countdown = left;
                         if left <= 3 {
-                            self.cast(title(&left.to_string(), name, "aqua"))
+                            self.cast(title(&left.to_string(), name, "aqua"));
+                            for p in self.players.values() {
+                                p.push(sound("minecraft:block.note_block.pling", p.pos, 0.8, 1.0 + (4 - left) as f32 * 0.2));
+                            }
                         } else if left == 8 {
                             self.announce(name, rules, "aqua")
                         }

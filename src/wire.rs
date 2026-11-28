@@ -265,3 +265,57 @@ pub fn remove_entities(ids: &[i32]) -> Buf {
     }
     packet(0x4e, &b)
 }
+
+pub fn sound(name: &str, p: Pos, volume: f32, pitch: f32) -> Buf {
+    let mut b = vi(0); // Inline SoundEvent (không lệ thuộc registry ID)
+    b.extend(string(name));
+    b.push(0); // has_fixed_range = false
+    b.extend(vi(0)); // SoundSource::MASTER
+    b.extend(((p.x * 8.0) as i32).to_be_bytes());
+    b.extend(((p.y * 8.0) as i32).to_be_bytes());
+    b.extend(((p.z * 8.0) as i32).to_be_bytes());
+    b.extend(volume.to_be_bytes());
+    b.extend(pitch.to_be_bytes());
+    b.extend(0i64.to_be_bytes());
+    packet(0x77, &b)
+}
+pub fn tab_list(header: &str, footer: &str) -> Buf {
+    let mut b = component(header, "gold");
+    b.extend(component(footer, "aqua"));
+    packet(0x7d, &b)
+}
+pub fn commands_tree(cmds: &[&str]) -> Buf {
+    let mut b = vi((1 + cmds.len()) as i32);
+    b.push(0x00); // root
+    b.extend(vi(cmds.len() as i32));
+    for i in 1..=cmds.len() {
+        b.extend(vi(i as i32));
+    }
+    for &cmd in cmds {
+        b.push(0x05); // literal | executable
+        b.extend(vi(0));
+        b.extend(string(cmd));
+    }
+    b.extend(vi(0));
+    packet(0x10, &b)
+}
+pub fn hologram_text(entity_id: i32, text: &str, color: &str) -> Buf {
+    let mut meta = vi(entity_id);
+    meta.extend([23, 5]); // Index 23: text (COMPONENT=5)
+    meta.extend(component(text, color));
+    meta.push(0xff);
+    packet(0x65, &meta)
+}
+pub fn map_item_data(map_id: i32, colors_16384: &[u8]) -> Buf {
+    let mut b = vi(map_id);
+    b.push(0); // scale = 0
+    b.push(1); // locked = true
+    b.push(0); // has_icons = false
+    b.push(128); // columns
+    b.push(128); // rows
+    b.push(0); // x_offset
+    b.push(0); // z_offset
+    b.extend(vi(colors_16384.len() as i32));
+    b.extend(colors_16384);
+    packet(0x34, &b)
+}

@@ -152,11 +152,11 @@ pub const GACHA_SHRINE: (i32, i32, i32) = (43, 78, 0);
 pub const PARKOUR_START: (i32, i32, i32) = (40, 78, 0);
 pub const PARKOUR_CHECKPOINTS: [(i32, i32, i32, &str); 8] = [
     (56, 79, 0, "Cổng Rừng Thông"),
-    (66, 86, 26, "Đảo Rừng Nổi"),
-    (40, 94, 58, "Cầu Băng Tuyết"),
-    (-2, 102, 60, "Pháo Đài Gạch"),
-    (-52, 110, 26, "Đảo Sắc Màu"),
-    (-54, 126, -18, "Tháp Xoắn Ốc"),
+    (66, 85, 26, "Đảo Rừng Nổi"),
+    (40, 93, 58, "Cầu Băng Tuyết"),
+    (-2, 101, 60, "Pháo Đài Gạch"),
+    (-52, 109, 26, "Đảo Sắc Màu"),
+    (-54, 125, -18, "Tháp Xoắn Ốc"),
     (-6, 129, -56, "Cầu Trời Mây"),
     (50, 136, -38, "Đỉnh Khải Hoàn"),
 ];
@@ -224,25 +224,42 @@ fn pad(b: &mut Blocks, cx: i32, y: i32, cz: i32, r: i32, top: i32, under: i32) {
     }
 }
 
-/// Tạo chuỗi bậc nhảy parkour nối hai điểm, đảm bảo khoảng cách nhảy ngang <= 3 và độ cao <= 1.
+/// Tạo chuỗi bậc nhảy parkour 3x3 nối mép ngoài của hai đảo, đảm bảo khoảng hở mép 1..2 block và dy <= 1.
 fn parkour_chain(
     b: &mut Blocks,
     from: (i32, i32, i32),
+    from_r: i32,
     to: (i32, i32, i32),
+    to_r: i32,
     mat_a: i32,
     mat_b: i32,
     under: i32,
 ) {
-    let dx = (to.0 - from.0) as f64;
-    let dy = (to.1 - from.1) as f64;
-    let dz = (to.2 - from.2) as f64;
-    let horiz = dx.hypot(dz);
-    let steps = (horiz / 3.4).ceil().max(dy.abs()).max(1.0) as i32;
-    for i in 1..steps {
-        let t = i as f64 / steps as f64;
-        let x = from.0 + (dx * t).round() as i32;
-        let y = from.1 + (dy * t).round() as i32;
-        let z = from.2 + (dz * t).round() as i32;
+    let dx_all = (to.0 - from.0) as f64;
+    let dz_all = (to.2 - from.2) as f64;
+    let dist_all = dx_all.hypot(dz_all).max(1.0);
+    let (ux, uz) = (dx_all / dist_all, dz_all / dist_all);
+
+    let start_off = from_r as f64 + 3.2;
+    let end_off = to_r as f64 + 3.2;
+    let usable = (dist_all - start_off - end_off).max(0.0);
+
+    let dy_total = (to.1 - from.1) as f64;
+    let min_jumps = dy_total.abs().round() as i32;
+    let target_jumps = ((usable / 4.2).round() as i32 + 2).max(min_jumps).max(2);
+    let n_pads = target_jumps - 1;
+
+    for i in 0..n_pads {
+        let t = if n_pads == 1 {
+            0.5
+        } else {
+            i as f64 / (n_pads - 1) as f64
+        };
+        let d = start_off + t * usable;
+        let x = from.0 + (ux * d).round() as i32;
+        let z = from.2 + (uz * d).round() as i32;
+        let yt = (i + 1) as f64 / (n_pads + 1) as f64;
+        let y = from.1 + (dy_total * yt).round() as i32;
         let m = if i % 2 == 0 { mat_a } else { mat_b };
         pad(b, x, y, z, 1, m, under);
     }
@@ -325,26 +342,51 @@ pub fn parkour_world() -> Blocks {
     // 5. Đường chạy Parkour 8 chặng quanh quần đảo trên không
     let cps = PARKOUR_CHECKPOINTS;
 
-    // Nối Đảo Trung Tâm -> Chặng 1 (Cổng Rừng Thông)
-    parkour_chain(&mut b, (52, 77, 0), (cps[0].0, cps[0].1 - 1, cps[0].2), PLANK, GOLD, LOG);
-
-    // Chặng 1 -> Chặng 2: Rừng Thông Nổi
-    parkour_chain(&mut b, (cps[0].0, cps[0].1 - 1, cps[0].2), (cps[1].0, cps[1].1 - 1, cps[1].2), GRASS, LOG, STONE);
-    // Đảo cảnh quan Rừng Thông
+    // Hub (mép x=52, y=77) -> Chặng 1 (mép x=54, y=78): 1 bước nhảy sạch cách 1 block
+    // Chặng 1 -> Chặng 2: Rừng Thông Nổi (6 bước leo đều, không chồng bậc)
+    parkour_chain(
+        &mut b,
+        (cps[0].0, cps[0].1 - 1, cps[0].2),
+        2,
+        (cps[1].0, cps[1].1 - 1, cps[1].2),
+        4,
+        GRASS,
+        LOG,
+        STONE,
+    );
     pad(&mut b, cps[1].0, cps[1].1 - 1, cps[1].2, 4, GRASS, STONE);
-    pine_tree(&mut b, cps[1].0 + 3, cps[1].1, cps[1].2 - 3, 7);
-    pine_tree(&mut b, cps[1].0 - 3, cps[1].1, cps[1].2 + 3, 6);
+    // Đặt 2 cây thông ở góc ngoài để tán lá không chắn hướng nhảy từ Chặng 1 tới
+    pine_tree(&mut b, cps[1].0 + 4, cps[1].1, cps[1].2 + 3, 7);
+    pine_tree(&mut b, cps[1].0 - 4, cps[1].1, cps[1].2 - 2, 6);
 
     // Chặng 2 -> Chặng 3: Cầu Băng Tuyết
-    parkour_chain(&mut b, (cps[1].0, cps[1].1 - 1, cps[1].2), (cps[2].0, cps[2].1 - 1, cps[2].2), ICE, SNOW, STONE);
+    parkour_chain(
+        &mut b,
+        (cps[1].0, cps[1].1 - 1, cps[1].2),
+        4,
+        (cps[2].0, cps[2].1 - 1, cps[2].2),
+        4,
+        ICE,
+        SNOW,
+        STONE,
+    );
     pad(&mut b, cps[2].0, cps[2].1 - 1, cps[2].2, 4, SNOW, ICE);
     for dy in 0..7 {
-        b.insert((cps[2].0 + 3, cps[2].1 + dy, cps[2].2 + 3), if dy == 6 { LIGHT } else { ICE });
-        b.insert((cps[2].0 - 3, cps[2].1 + dy, cps[2].2 + 3), if dy == 6 { LIGHT } else { ICE });
+        b.insert((cps[2].0 + 4, cps[2].1 + dy, cps[2].2 + 4), if dy == 6 { LIGHT } else { ICE });
+        b.insert((cps[2].0 - 4, cps[2].1 + dy, cps[2].2 + 4), if dy == 6 { LIGHT } else { ICE });
     }
 
     // Chặng 3 -> Chặng 4: Pháo Đài Gạch
-    parkour_chain(&mut b, (cps[2].0, cps[2].1 - 1, cps[2].2), (cps[3].0, cps[3].1 - 1, cps[3].2), BRICKS, STONE, STONE);
+    parkour_chain(
+        &mut b,
+        (cps[2].0, cps[2].1 - 1, cps[2].2),
+        4,
+        (cps[3].0, cps[3].1 - 1, cps[3].2),
+        4,
+        BRICKS,
+        STONE,
+        STONE,
+    );
     pad(&mut b, cps[3].0, cps[3].1 - 1, cps[3].2, 4, BRICKS, STONE);
     for (ox, oz) in [(-4, -4), (4, -4), (-4, 4), (4, 4)] {
         for y in 0..5 {
@@ -354,35 +396,74 @@ pub fn parkour_world() -> Blocks {
     }
 
     // Chặng 4 -> Chặng 5: Đảo Sắc Màu
-    parkour_chain(&mut b, (cps[3].0, cps[3].1 - 1, cps[3].2), (cps[4].0, cps[4].1 - 1, cps[4].2), RED, LIME, BLUE);
+    parkour_chain(
+        &mut b,
+        (cps[3].0, cps[3].1 - 1, cps[3].2),
+        4,
+        (cps[4].0, cps[4].1 - 1, cps[4].2),
+        4,
+        RED,
+        LIME,
+        BLUE,
+    );
     pad(&mut b, cps[4].0, cps[4].1 - 1, cps[4].2, 4, BLUE, WHITE);
 
-    // Chặng 5 -> Chặng 6: Tháp Xoắn Ốc (xoay vòng leo cao 16 block quanh lõi sáng)
-    parkour_chain(&mut b, (cps[4].0, cps[4].1 - 1, cps[4].2), (-54, 110, -10), GOLD, WHITE, STONE);
+    // Chặng 5 -> Chặng 6: Tháp Xoắn Ốc (bán kính 6.8, góc xoay 0.62 rad -> không chồng bậc)
     let (tcx, tcz) = (-54i32, -18i32);
-    for y in 108..=127 {
-        for dx in -1..=1 {
-            for dz in -1..=1 {
+    let start_ang = std::f64::consts::FRAC_PI_2;
+    let first_x = tcx + (start_ang.cos() * 6.8).round() as i32;
+    let first_z = tcz + (start_ang.sin() * 6.8).round() as i32;
+    parkour_chain(
+        &mut b,
+        (cps[4].0, cps[4].1 - 1, cps[4].2),
+        4,
+        (first_x, 109, first_z),
+        1,
+        GOLD,
+        WHITE,
+        STONE,
+    );
+    for y in 107..=126 {
+        for dx in -1i32..=1 {
+            for dz in -1i32..=1 {
                 let m = if dx == 0 && dz == 0 { LIGHT } else { BRICKS };
                 b.insert((tcx + dx, y, tcz + dz), m);
             }
         }
     }
     for step in 0..16 {
-        let ang = (step as f64) * 0.55;
-        let rx = tcx + (ang.cos() * 5.2).round() as i32;
-        let rz = tcz + (ang.sin() * 5.2).round() as i32;
-        let ry = 110 + step;
+        let ang = start_ang - (step as f64) * 0.62;
+        let rx = tcx + (ang.cos() * 6.8).round() as i32;
+        let rz = tcz + (ang.sin() * 6.8).round() as i32;
+        let ry = 109 + step;
         pad(&mut b, rx, ry, rz, 1, if step % 2 == 0 { GOLD } else { PLANK }, STONE);
     }
     pad(&mut b, cps[5].0, cps[5].1 - 1, cps[5].2, 4, GOLD, BRICKS);
 
     // Chặng 6 -> Chặng 7: Cầu Trời Mây
-    parkour_chain(&mut b, (cps[5].0, cps[5].1 - 1, cps[5].2), (cps[6].0, cps[6].1 - 1, cps[6].2), WHITE, PLANK, WHITE);
+    parkour_chain(
+        &mut b,
+        (cps[5].0, cps[5].1 - 1, cps[5].2),
+        4,
+        (cps[6].0, cps[6].1 - 1, cps[6].2),
+        4,
+        WHITE,
+        PLANK,
+        WHITE,
+    );
     pad(&mut b, cps[6].0, cps[6].1 - 1, cps[6].2, 4, WHITE, SNOW);
 
     // Chặng 7 -> Chặng 8: Đèo Tuyết Cổ -> Đỉnh Khải Hoàn
-    parkour_chain(&mut b, (cps[6].0, cps[6].1 - 1, cps[6].2), (cps[7].0, cps[7].1 - 1, cps[7].2), SNOW, GOLD, ICE);
+    parkour_chain(
+        &mut b,
+        (cps[6].0, cps[6].1 - 1, cps[6].2),
+        4,
+        (cps[7].0, cps[7].1 - 1, cps[7].2),
+        6,
+        SNOW,
+        GOLD,
+        ICE,
+    );
 
     // 6. Đền Đỉnh Khải Hoàn (13x13) tại Chặng 8 + Chữ nổi "SUMMIT"
     let (sx, sy, sz) = (cps[7].0, cps[7].1 - 1, cps[7].2);
