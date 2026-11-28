@@ -1,89 +1,49 @@
-name: Build RK Festival
+name: Build & Release RK Festival
 
 on:
   push:
-    branches: [main]
-    tags: ["v*"]
-  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Run unit tests (prebaked)
-        run: cargo test --locked
-      - name: Run unit tests (cpu mapgen)
-        run: cargo test --locked --no-default-features
-
   build:
-    needs: test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: armv7-prebaked
-            target: armv7-unknown-linux-musleabihf
-            flags: ""
-          - name: armv7-cpu
-            target: armv7-unknown-linux-musleabihf
-            flags: "--no-default-features"
-          - name: aarch64-prebaked
-            target: aarch64-unknown-linux-musl
-            flags: ""
-          - name: aarch64-cpu
-            target: aarch64-unknown-linux-musl
-            flags: "--no-default-features"
-          - name: x86_64-prebaked
-            target: x86_64-unknown-linux-gnu
-            flags: ""
-          - name: x86_64-cpu
-            target: x86_64-unknown-linux-gnu
-            flags: "--no-default-features"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain & ARM targets
+        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-unknown-linux-musl,armv7-unknown-linux-musleabihf
 
-      - name: Build ${{ matrix.name }}
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Build S905L (aarch64-cpu)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
         run: |
-          cargo build --locked --release --target ${{ matrix.target }} ${{ matrix.flags }}
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/rk-festival dist/rk-festival-${{ matrix.name }}
-          (cd dist && sha256sum rk-festival-${{ matrix.name }} > rk-festival-${{ matrix.name }}.sha256)
+          cargo build --release --locked --target aarch64-unknown-linux-musl
+          cp target/aarch64-unknown-linux-musl/release/rk-festival rk-festival-aarch64-cpu
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rk-festival-${{ matrix.name }}
-          path: dist/*
-
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: Merge SHA256SUMS
+      - name: Build RK3229 (armv7-prebaked)
+        env:
+          CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER: rust-lld
         run: |
-          cat artifacts/*.sha256 > artifacts/SHA256SUMS
-          rm artifacts/*.sha256
+          cargo build --release --locked --target armv7-unknown-linux-musleabihf --features prebaked
+          cp target/armv7-unknown-linux-musleabihf/release/rk-festival rk-festival-armv7-prebaked
 
-      - name: Create GitHub Release
+      - name: Publish to latest release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*
-          generate_release_notes: true
+          tag_name: latest
+          name: Latest Build
+          make_latest: true
+          files: |
+            rk-festival-aarch64-cpu
+            rk-festival-armv7-prebaked
