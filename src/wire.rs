@@ -319,3 +319,26 @@ pub fn map_item_data(map_id: i32, colors_16384: &[u8]) -> Buf {
     b.extend(colors_16384);
     packet(0x34, &b)
 }
+
+pub fn poster_frame(entity_id: i32, uuid: &[u8; 16], p: Pos, facing: i32, map_id: i32) -> Buf {
+    let mut add = vi(entity_id);
+    add.extend(uuid);
+    add.extend(vi(61)); // minecraft:glow_item_frame (26.3)
+    add.extend(p.xyz());
+    add.extend([0, 0, 0, 0]); // velocity(0), pitch(0), yaw(0), head_yaw(0)
+    add.extend(vi(facing)); // 2=North, 3=South, 4=West, 5=East
+
+    let mut meta = vi(entity_id);
+    // Index 9: ItemFrame DATA_ITEM (type SLOT = 7)
+    // (Nếu vào game thấy khung trống, đổi số 9 thành 8)
+    meta.extend([9, 7]);
+    meta.extend(vi(1)); // count = 1
+    meta.extend(vi(1238)); // minecraft:filled_map
+    meta.extend(vi(1)); // components_to_add = 1
+    meta.extend(vi(0)); // components_to_remove = 0
+    meta.extend(vi(48)); // minecraft:map_id
+    meta.extend(vi(map_id));
+    meta.push(0xff);
+
+    [packet(1, &add), packet(0x65, &meta)].concat()
+}

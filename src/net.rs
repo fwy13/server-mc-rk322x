@@ -64,8 +64,9 @@ pub fn connect(
             return Err(invalid());
         }
         let n = online.load(std::sync::atomic::Ordering::Relaxed);
+        let fav = include_str!("../assets/favicon.b64").trim();
         let status = format!(
-            r#"{{"version":{{"name":"26.3","protocol":777}},"players":{{"max":{max},"online":{n}}},"description":{{"text":"RK Festival · Rust · LAN"}}}}"#
+            r#"{{"version":{{"name":"26.3","protocol":777}},"players":{{"max":{max},"online":{n}}},"description":{{"text":"RK Festival · Rust · LAN"}},"favicon":"{fav}"}}"#
         );
         s.write_all(&packet(0, &string(&status)))?;
         let (i, p) = read_packet(&mut r)?;

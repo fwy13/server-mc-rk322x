@@ -19,6 +19,55 @@ const HOLO_BASE_ID: i32 = 100_000;
 const LB_HOLO_ID: i32 = 100_050;
 const LB_UUID: [u8; 16] = *b"RKLEADERBOARD001";
 
+const POSTER_BASE_ID: i32 = 100_100;
+const POSTER_W: i32 = 3; // Chiều ngang (số khung) — khớp với --grid 3x2
+const POSTER_H: i32 = 2; // Chiều cao (số khung)
+
+fn poster_uuid(i: usize) -> [u8; 16] {
+    let mut u = *b"RKPOSTERFRAME000";
+    u[13] = (i / 100) as u8 + b'0';
+    u[14] = ((i / 10) % 10) as u8 + b'0';
+    u[15] = (i % 10) as u8 + b'0';
+    u[6] = (u[6] & 15) | 64;
+    u[8] = (u[8] & 63) | 128;
+    u
+}
+
+fn poster_spawn() -> Shared {
+    static CACHE: OnceLock<Shared> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            // 1. Nạp toàn bộ pixel bản đồ (0x34) đã bake từ img2mcmap.py
+            let mut out = include_bytes!("../assets/poster.pkt").to_vec();
+            // 2. Treo lưới 3x2 tại mép Bắc Đảo Trung Tâm (z = -8, quay mặt hướng Nam = 3 về phía Đền Gacha)
+            let mut idx = 0usize;
+            for ty in 0..POSTER_H {
+                for tx in 0..POSTER_W {
+                    let map_id = 1 + idx as i32;
+                    let x = 42.5 + tx as f64;
+                    let y = 80.5 - ty as f64;
+                    let z = -8.0;
+                    out.extend(poster_frame(
+                        POSTER_BASE_ID + idx as i32,
+                        &poster_uuid(idx),
+                        Pos::at(x, y, z),
+                        3, // South (quay mặt về z dương)
+                        map_id,
+                    ));
+                    idx += 1;
+                }
+            }
+            Shared::from(out)
+        })
+        .clone()
+}
+
+fn poster_remove() -> Buf {
+    let total = (POSTER_W * POSTER_H) as usize;
+    let ids: Vec<i32> = (0..total).map(|i| POSTER_BASE_ID + i as i32).collect();
+    remove_entities(&ids)
+}
+
 fn holo_uuid(i: usize) -> [u8; 16] {
     let mut u = *b"RKHOLOGRAMTEXT00";
     u[14] = (i / 10) as u8 + b'0';
@@ -270,13 +319,26 @@ impl Arena {
         board.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
         let mut text = String::from("★ BẢNG XẾP HẠNG RK FESTIVAL ★");
         for (i, (name, wins, coins)) in board.into_iter().take(5).enumerate() {
-            text.push_str(&format!("\n#{} {} · {} Thắng · {} Xu", i + 1, name, wins, coins));
+            text.push_str(&format!(
+                "\n#{} {} · {} Thắng · {} Xu",
+                i + 1,
+                name,
+                wins,
+                coins
+            ));
         }
         self.cast(hologram_text(LB_HOLO_ID, &text, "gold"));
     }
     fn tab_packet(&self, p: &Player) -> Buf {
-        let role = if self.is_hub { "S905L HUB" } else { "RK3229 ARENA" };
-        let header = format!("✦ RK FESTIVAL 26.3 · {role} ✦\nOnline: {} người", self.players.len());
+        let role = if self.is_hub {
+            "S905L HUB"
+        } else {
+            "RK3229 ARENA"
+        };
+        let header = format!(
+            "✦ RK FESTIVAL 26.3 · {role} ✦\nOnline: {} người",
+            self.players.len()
+        );
         let footer = format!(
             "Xu: {} · Thắng: {}\nLệnh: /menu · /parkour · /gacha · /arena · /lobby",
             p.coins, p.wins
@@ -549,6 +611,7 @@ impl Arena {
                 p.send(crate::world::frames(rally));
                 if self.is_hub && !rally {
                     p.send(holograms_spawn());
+                    p.send(poster_spawn());
                     p.push(hologram_spawn(
                         LB_HOLO_ID,
                         &LB_UUID,
@@ -589,7 +652,9 @@ impl Arena {
                     },
                     "gold",
                 ));
-                all.extend(commands_tree(&["menu", "parkour", "gacha", "lobby", "arena"]));
+                all.extend(commands_tree(&[
+                    "menu", "parkour", "gacha", "lobby", "arena",
+                ]));
                 all.extend(self.tab_packet(&p));
                 p.push(all);
                 p.push(chat(
@@ -665,6 +730,9 @@ impl Arena {
                 p.send(clear.clone());
                 if let Some(h) = &holos {
                     p.send(h.clone());
+                    if self.is_hub {
+                        p.send(poster_spawn());
+                    }
                 }
             }
         }
@@ -700,7 +768,12 @@ impl Arena {
             }
             if let Some(frame) = gacha_frame {
                 p.push(frame);
-                p.push(sound("minecraft:ui.button.click", p.pos, 0.6, 0.9 + (now % 5) as f32 * 0.08));
+                p.push(sound(
+                    "minecraft:ui.button.click",
+                    p.pos,
+                    0.6,
+                    0.9 + (now % 5) as f32 * 0.08,
+                ));
             }
             if let Some(idx) = gacha_prize {
                 let prize = &PRIZES[idx];
@@ -803,7 +876,12 @@ impl Arena {
                                         PARKOUR_START.1 as f64,
                                         PARKOUR_START.2 as f64 + 0.5,
                                     );
-                                    p.push(sound("minecraft:ui.toast.challenge_complete", p.pos, 1.0, 1.0));
+                                    p.push(sound(
+                                        "minecraft:ui.toast.challenge_complete",
+                                        p.pos,
+                                        1.0,
+                                        1.0,
+                                    ));
                                     p.push(title(
                                         "CHINH PHỤC ĐỈNH KHẢI HOÀN!",
                                         "+30 Xu · Bạn đã hoàn thành 8 chặng Parkour!",
@@ -815,7 +893,12 @@ impl Arena {
                                     ));
                                 } else {
                                     p.coins += 5;
-                                    p.push(sound("minecraft:entity.experience_orb.pickup", p.pos, 0.9, 1.2));
+                                    p.push(sound(
+                                        "minecraft:entity.experience_orb.pickup",
+                                        p.pos,
+                                        0.9,
+                                        1.2,
+                                    ));
                                     p.push(title(
                                         &format!("CHẶNG {}/8", p.cp),
                                         &format!("{cp_name} · +5 Xu"),
@@ -900,6 +983,7 @@ impl Arena {
                         let map = crate::world::frames(true);
                         if self.is_hub {
                             self.cast(holograms_remove());
+                            self.cast(poster_remove());
                         }
                         for p in self.players.values_mut() {
                             p.exploring = false;
@@ -930,7 +1014,12 @@ impl Arena {
                         if left <= 3 {
                             self.cast(title(&left.to_string(), name, "aqua"));
                             for p in self.players.values() {
-                                p.push(sound("minecraft:block.note_block.pling", p.pos, 0.8, 1.0 + (4 - left) as f32 * 0.2));
+                                p.push(sound(
+                                    "minecraft:block.note_block.pling",
+                                    p.pos,
+                                    0.8,
+                                    1.0 + (4 - left) as f32 * 0.2,
+                                ));
                             }
                         } else if left == 8 {
                             self.announce(name, rules, "aqua")
