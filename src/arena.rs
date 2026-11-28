@@ -19,6 +19,10 @@ const HOLO_BASE_ID: i32 = 100_000;
 const LB_HOLO_ID: i32 = 100_050;
 const LB_UUID: [u8; 16] = *b"RKLEADERBOARD001";
 
+const RP_UUID: [u8; 16] = *b"RKFESTIVALPACK01";
+const HD_POSTER_ID: i32 = 100_200;
+const HD_POSTER_UUID: [u8; 16] = *b"RKHDPOSTERDISP01";
+
 const POSTER_BASE_ID: i32 = 100_100;
 const POSTER_W: i32 = 3; // Chiều ngang (số khung) — khớp với --grid 3x2
 const POSTER_H: i32 = 2; // Chiều cao (số khung)
@@ -246,6 +250,7 @@ pub struct Arena {
     keep: u64,
     countdown: u64,
     results_until: u64,
+    resource_pack: Option<(String, String)>,
 }
 impl Arena {
     pub fn new(
@@ -253,6 +258,7 @@ impl Arena {
         list: Vec<Game>,
         seed: u64,
         peer: Option<SocketAddrV4>,
+        resource_pack: Option<(String, String)>,
         is_hub: bool,
     ) -> Self {
         Self {
@@ -274,6 +280,7 @@ impl Arena {
             keep: 0,
             countdown: 0,
             results_until: 0,
+            resource_pack: Some((String::new(), String::new())),
         }
     }
     pub fn online(&self) -> usize {
@@ -611,6 +618,20 @@ impl Arena {
                 p.send(crate::world::frames(rally));
                 if self.is_hub && !rally {
                     p.send(holograms_spawn());
+                    if let Some((ref url, ref sha1)) = self.resource_pack {
+                        p.push(resource_pack_push(
+                            &RP_UUID,
+                            url,
+                            sha1,
+                            false,
+                            Some("Tải Resource Pack nhẹ (<100KB) để xem Poster HD tại Sảnh!"),
+                        ));
+                        p.push(poster_hd_spawn(
+                            HD_POSTER_ID,
+                            &HD_POSTER_UUID,
+                            Pos::at(43.5, 79.0, -8.2),
+                        ));
+                    }
                     p.send(poster_spawn());
                     p.push(hologram_spawn(
                         LB_HOLO_ID,

@@ -30,6 +30,8 @@ fn main() -> io::Result<()> {
     let mut stats = false;
     let mut peer: Option<SocketAddrV4> = None;
     let mut is_hub = true;
+    let mut rp_url: Option<String> = None;
+    let mut rp_sha1 = String::new();
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -41,7 +43,7 @@ fn main() -> io::Result<()> {
                 return Ok(());
             }
             "--help" | "-h" => {
-                println!("rk-festival --listen LAN_IP:25565 --game all|color,tnt,... --max-players 50 --peer PEER_IP:25565 --role hub|arena --stats\nrk-festival --list");
+                println!("rk-festival --listen LAN_IP:25565 --game all|color,tnt,... --max-players 50 --peer PEER_IP:25565 --role hub|arena --rp-url URL --rp-sha1 HEX --stats\nrk-festival --list");
                 return Ok(());
             }
             "--listen" => {
@@ -72,6 +74,12 @@ fn main() -> io::Result<()> {
                     "arena" => false,
                     _ => return Err(wire::invalid()),
                 };
+            }
+            "--rp-url" => {
+                rp_url = Some(args.next().ok_or_else(wire::invalid)?);
+            }
+            "--rp-sha1" => {
+                rp_sha1 = args.next().ok_or_else(wire::invalid)?;
             }
             "--game" => {
                 let s = args.next().ok_or_else(wire::invalid)?;
@@ -147,6 +155,7 @@ fn main() -> io::Result<()> {
             .unwrap_or_default()
             .as_nanos() as u64,
         peer,
+        rp_url.map(|url| (url, rp_sha1)),
         is_hub,
     );
     let base = Instant::now();

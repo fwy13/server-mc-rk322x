@@ -342,3 +342,40 @@ pub fn poster_frame(entity_id: i32, uuid: &[u8; 16], p: Pos, facing: i32, map_id
 
     [packet(1, &add), packet(0x65, &meta)].concat()
 }
+pub fn resource_pack_push(
+    uuid: &[u8; 16],
+    url: &str,
+    sha1: &str,
+    forced: bool,
+    prompt: Option<&str>,
+) -> Buf {
+    let mut b = uuid.to_vec();
+    b.extend(string(url));
+    b.extend(string(sha1));
+    b.push(u8::from(forced));
+    match prompt {
+        Some(msg) => {
+            b.push(1);
+            b.extend(component(msg, "gold"));
+        }
+        None => b.push(0),
+    }
+    packet(0x52, &b)
+}
+pub fn poster_hd_spawn(entity_id: i32, uuid: &[u8; 16], p: Pos) -> Buf {
+    let mut add = vi(entity_id);
+    add.extend(uuid);
+    add.extend(vi(135)); // minecraft:text_display (26.3 protocol 777)
+    add.extend(p.xyz());
+    add.extend([0; 5]); // yaw=0 -> quay mặt hướng Nam (+Z) về phía Đền Gacha
+
+    let mut meta = vi(entity_id);
+    meta.extend([15, 0, 0]); // Index 15: billboard = 0 (FIXED)
+    meta.extend([23, 5]); // Index 23: text = ký tự ảnh HD \uE001 trong Resource Pack
+    meta.extend(component("\u{E001}", "white"));
+    meta.extend([25, 1]); // Index 25: background_color = 0 (trong suốt)
+    meta.extend(vi(0));
+    meta.extend([27, 0, 0]); // Index 27: style_flags = 0 (không bóng chữ)
+    meta.push(0xff);
+    [packet(1, &add), packet(0x65, &meta)].concat()
+}

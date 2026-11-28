@@ -24,6 +24,7 @@ pub enum MenuKind {
 }
 
 // Item protocol ID chuẩn từ Minecraft Java 26.3 registries.json.
+const COMP_CUSTOM_NAME: i32 = 6;
 const ITEM_GLASS_PANE: i32 = 628;
 const ITEM_HOPPER: i32 = 834;
 const ITEM_CHEST: i32 = 404;
@@ -149,12 +150,12 @@ impl GachaSpin {
         content.extend(vi(27));
         for i in 0..27 {
             let item = match i {
-                4 | 22 => Some((ITEM_HOPPER, 1)),
+                4 | 22 => Some((ITEM_HOPPER, 1, "▼ Ô TRÚNG THƯỞNG ▼", "gold")),
                 9..=17 => {
                     let p = &PRIZES[self.reel[self.step + (i - 9)]];
-                    Some((p.icon, p.count))
+                    Some((p.icon, p.count, p.name, p.color))
                 }
-                _ => Some((ITEM_GLASS_PANE, 1)),
+                _ => Some((ITEM_GLASS_PANE, 1, " ", "gray")),
             };
             content.extend(slot(item));
         }
@@ -163,14 +164,21 @@ impl GachaSpin {
     }
 }
 
-fn slot(item: Option<(i32, i32)>) -> Buf {
+fn slot(item: Option<(i32, i32, &str, &str)>) -> Buf {
     match item {
         None => vi(0),
-        Some((id, count)) => {
+        Some((id, count, name, color)) => {
             let mut b = vi(count);
             b.extend(vi(id));
-            b.extend(vi(0));
-            b.extend(vi(0));
+            if name.is_empty() {
+                b.extend(vi(0));
+                b.extend(vi(0));
+            } else {
+                b.extend(vi(1)); // components_to_add = 1
+                b.extend(vi(0)); // components_to_remove = 0
+                b.extend(vi(COMP_CUSTOM_NAME)); // minecraft:custom_name = 6
+                b.extend(component(name, color));
+            }
             b
         }
     }
@@ -189,13 +197,13 @@ pub fn open_packets() -> Shared {
             content.extend(vi(27));
             for i in 0..27 {
                 let item = if i < GAMES.len() {
-                    Some((ICONS[i], 1))
+                    Some((ICONS[i], 1, GAMES[i].meta().1, "aqua"))
                 } else if i as i16 == SLOT_PARKOUR {
-                    Some((ITEM_COMPASS, 1))
+                    Some((ITEM_COMPASS, 1, "✦ Khám phá & Parkour 8 chặng ✦", "green"))
                 } else if i as i16 == SLOT_GACHA {
-                    Some((ITEM_CHEST, 1))
+                    Some((ITEM_CHEST, 1, "★ Quay Rương Gacha (10 Xu) ★", "gold"))
                 } else if i as i16 == SLOT_LOBBY {
-                    Some((ITEM_NETHER_STAR, 1))
+                    Some((ITEM_NETHER_STAR, 1, "Về Sảnh Chính (Hub)", "yellow"))
                 } else {
                     None
                 };
